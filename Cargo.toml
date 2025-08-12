@@ -5,4 +5,4 @@ edition = "2024"
 
 [dependencies]
 ffmpeg-next = "7.1.0"
-wayland-client = "0.31.11"
+wl-capture = { path = "wl-capture" }
