@@ -21,32 +21,34 @@ use wayland_protocols_wlr::screencopy::v1::client::{
     zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1,
 };
 
-use crate::utils::{create_fd, create_mmap};
+use crate::utils::{create_fd, create_mmap, extract_frames_from_mmap};
 
 mod utils;
 
 struct Data {
-    wlr_screencopy_manager: Option<ZwlrScreencopyManagerV1>,
+    zwlr_screencopy_manager: Option<ZwlrScreencopyManagerV1>,
+    zwlr_screencopy_frame: Option<ZwlrScreencopyFrameV1>,
+
     wl_output: Option<WlOutput>,
     wl_shm: Option<WlShm>,
     wl_shm_pool: Option<WlShmPool>,
-    wl_shm_data: Option<NonNull<c_void>>,
-    screencopy_frame: Option<ZwlrScreencopyFrameV1>,
-    screencopy_buffer: Option<WlBuffer>,
-    screencopy_buffer_config: Option<BufferConfig>,
+
+    result_buffer: Option<WlBuffer>,
+    result_config: Option<BufferConfig>,
+    result_raw_ptr: Option<NonNull<c_void>>,
 }
 
 impl Default for Data {
     fn default() -> Self {
         Data {
-            wlr_screencopy_manager: None,
+            zwlr_screencopy_manager: None,
+            zwlr_screencopy_frame: None,
             wl_output: None,
             wl_shm: None,
             wl_shm_pool: None,
-            wl_shm_data: None,
-            screencopy_frame: None,
-            screencopy_buffer: None,
-            screencopy_buffer_config: None,
+            result_raw_ptr: None,
+            result_buffer: None,
+            result_config: None,
         }
     }
 }
@@ -75,7 +77,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for Data {
         {
             // we depend directly on v3 of screencopy
             if interface == "zwlr_screencopy_manager_v1" && version == 3 {
-                state.wlr_screencopy_manager = Some(
+                state.zwlr_screencopy_manager = Some(
                     registry.bind::<ZwlrScreencopyManagerV1, _, _>(name, version, qhandle, *data),
                 );
             }
@@ -84,8 +86,6 @@ impl Dispatch<wl_registry::WlRegistry, ()> for Data {
                 state.wl_output =
                     Some(registry.bind::<WlOutput, _, _>(name, version, qhandle, *data));
             }
-
-            println!("{}, version {}", interface, version);
 
             if interface == "wl_shm" {
                 state.wl_shm = Some(registry.bind::<WlShm, _, _>(name, version, qhandle, *data));
@@ -158,8 +158,8 @@ impl Dispatch<WlBuffer, ()> for Data {
     ) {
         match event {
             wayland_client::protocol::wl_buffer::Event::Release => {
-                state.screencopy_buffer.as_ref().unwrap().destroy();
-                state.screencopy_buffer = None;
+                state.result_buffer.as_ref().unwrap().destroy();
+                state.result_buffer = None;
             }
             _ => {
                 panic!("Unimplemented event!");
@@ -184,19 +184,16 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for Data {
                 height,
                 stride,
             } => {
-                // [TODO]: Dig into this format system more?
-                // We might want to write some kind of dispatcher to handle more format type
-                // but Argb8888 is well supported.
+                // [TODO]: Is there a way to request a certain type of format?
                 let selected_format = match format {
                     WEnum::Value(value) => match value {
-                        Format::Argb8888 => Some(value),
-                        Format::Xrgb8888 => Some(value),
+                        Format::Argb8888 | Format::Xrgb8888 | Format::Xbgr8888 => Some(value),
                         _ => None,
                     },
                     WEnum::Unknown(_) => None,
                 };
 
-                state.screencopy_buffer_config = Some(BufferConfig {
+                state.result_config = Some(BufferConfig {
                     format: selected_format.unwrap(),
                     width: width,
                     height: height,
@@ -227,7 +224,7 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for Data {
             }
 
             zwlr_screencopy_frame_v1::Event::BufferDone => {
-                let buffer_cfg = state.screencopy_buffer_config.as_ref().unwrap();
+                let buffer_cfg = state.result_config.as_ref().unwrap();
 
                 if state.wl_shm_pool.is_none() {
                     let size = buffer_cfg.height as i32 * buffer_cfg.stride as i32;
@@ -239,16 +236,16 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for Data {
                         *data,
                     );
 
-                    state.wl_shm_data = create_mmap(size as usize, fd.as_fd());
+                    state.result_raw_ptr = create_mmap(size as usize, fd.as_fd());
 
-                    if state.wl_shm_data.is_none() {
+                    if state.result_raw_ptr.is_none() {
                         panic!("Failed to mmap data!");
                     }
 
                     state.wl_shm_pool = Some(shm_pool);
                 }
 
-                state.screencopy_buffer = Some(state.wl_shm_pool.as_ref().unwrap().create_buffer(
+                state.result_buffer = Some(state.wl_shm_pool.as_ref().unwrap().create_buffer(
                     0,
                     // [FIXME]: Potential overflow
                     // technically not, since these value are given
@@ -262,10 +259,10 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for Data {
                 ));
 
                 state
-                    .screencopy_frame
+                    .zwlr_screencopy_frame
                     .as_ref()
                     .unwrap()
-                    .copy(&state.screencopy_buffer.as_ref().unwrap());
+                    .copy(&state.result_buffer.as_ref().unwrap());
             }
 
             zwlr_screencopy_frame_v1::Event::Ready {
@@ -273,15 +270,19 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for Data {
                 tv_sec_lo,
                 tv_nsec,
             } => {
-                // [TODO] Read the data.
+                // We are dealing with a raw c pointer.
+                let ptr = state.result_raw_ptr.as_ref().unwrap();
+                let frame_config = state.result_config.as_ref().unwrap();
 
-                state.screencopy_frame.as_ref().unwrap().destroy();
-                state.screencopy_frame = None;
+                let pixel_vec = extract_frames_from_mmap(ptr, frame_config);
+
+                state.zwlr_screencopy_frame.as_ref().unwrap().destroy();
+                state.zwlr_screencopy_frame = None;
             }
 
             zwlr_screencopy_frame_v1::Event::Failed => {
-                state.screencopy_frame.as_ref().unwrap().destroy();
-                state.screencopy_frame = None;
+                state.zwlr_screencopy_frame.as_ref().unwrap().destroy();
+                state.zwlr_screencopy_frame = None;
             }
 
             // Just in case if a new events is added without a version bump
@@ -304,7 +305,7 @@ pub fn test() {
 
     event_queue.roundtrip(&mut data).unwrap();
 
-    if data.wlr_screencopy_manager.is_none() {
+    if data.zwlr_screencopy_manager.is_none() {
         panic!("Support for wlr_screencopy is not announced. Exiting.");
     }
 
@@ -316,10 +317,10 @@ pub fn test() {
         panic!("Support for wl_shm is not announced. Exiting.");
     }
 
-    let scrpy_mn = data.wlr_screencopy_manager.as_ref().unwrap();
+    let scrpy_mn = data.zwlr_screencopy_manager.as_ref().unwrap();
     let output = data.wl_output.as_ref().unwrap();
 
-    data.screencopy_frame = Some(scrpy_mn.capture_output(1, &output, &qh, ()));
+    data.zwlr_screencopy_frame = Some(scrpy_mn.capture_output(1, &output, &qh, ()));
 
     loop {
         sleep(Duration::new(1, 0));
