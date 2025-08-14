@@ -1,4 +1,9 @@
-use std::{os::fd::AsFd, thread::sleep, time::Duration};
+use std::{
+    os::{fd::AsFd, raw::c_void},
+    ptr::NonNull,
+    thread::sleep,
+    time::Duration,
+};
 
 use wayland_client::{
     Connection, Dispatch, QueueHandle, WEnum,
@@ -16,7 +21,7 @@ use wayland_protocols_wlr::screencopy::v1::client::{
     zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1,
 };
 
-use crate::utils::create_fd;
+use crate::utils::{create_fd, create_mmap};
 
 mod utils;
 
@@ -25,6 +30,7 @@ struct Data {
     wl_output: Option<WlOutput>,
     wl_shm: Option<WlShm>,
     wl_shm_pool: Option<WlShmPool>,
+    wl_shm_data: Option<NonNull<c_void>>,
     screencopy_frame: Option<ZwlrScreencopyFrameV1>,
     screencopy_buffer: Option<WlBuffer>,
     screencopy_buffer_config: Option<BufferConfig>,
@@ -37,6 +43,7 @@ impl Default for Data {
             wl_output: None,
             wl_shm: None,
             wl_shm_pool: None,
+            wl_shm_data: None,
             screencopy_frame: None,
             screencopy_buffer: None,
             screencopy_buffer_config: None,
@@ -181,12 +188,10 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for Data {
                 // We might want to write some kind of dispatcher to handle more format type
                 // but Argb8888 is well supported.
                 let selected_format = match format {
-                    WEnum::Value(value) => {
-                        match value {
-                            Format::Argb8888 => Some(value),
-                            Format::Xrgb8888 => Some(value),
-                            _ => None,
-                        }
+                    WEnum::Value(value) => match value {
+                        Format::Argb8888 => Some(value),
+                        Format::Xrgb8888 => Some(value),
+                        _ => None,
                     },
                     WEnum::Unknown(_) => None,
                 };
@@ -234,26 +239,33 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for Data {
                         *data,
                     );
 
-                    // [TODO]: Create a mem mapped reference of shm pool
-                    // so we can access the shared data too?
+                    state.wl_shm_data = create_mmap(size as usize, fd.as_fd());
+
+                    if state.wl_shm_data.is_none() {
+                        panic!("Failed to mmap data!");
+                    }
 
                     state.wl_shm_pool = Some(shm_pool);
                 }
 
                 state.screencopy_buffer = Some(state.wl_shm_pool.as_ref().unwrap().create_buffer(
                     0,
-
                     // [FIXME]: Potential overflow
+                    // technically not, since these value are given
+                    // to us, thus it should have been safe?
                     buffer_cfg.width as i32,
                     buffer_cfg.height as i32,
                     buffer_cfg.stride as i32,
-    
                     buffer_cfg.format,
                     qhandle,
                     *data,
                 ));
 
-                state.screencopy_frame.as_ref().unwrap().copy(&state.screencopy_buffer.as_ref().unwrap());
+                state
+                    .screencopy_frame
+                    .as_ref()
+                    .unwrap()
+                    .copy(&state.screencopy_buffer.as_ref().unwrap());
             }
 
             zwlr_screencopy_frame_v1::Event::Ready {
@@ -261,9 +273,7 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for Data {
                 tv_sec_lo,
                 tv_nsec,
             } => {
-                println!("Ready event called");
-
-                // do something
+                // [TODO] Read the data.
 
                 state.screencopy_frame.as_ref().unwrap().destroy();
                 state.screencopy_frame = None;

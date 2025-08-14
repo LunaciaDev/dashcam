@@ -1,6 +1,8 @@
-use std::os::fd::{AsFd, OwnedFd};
+use std::{num::NonZeroUsize, os::{fd::{AsFd, BorrowedFd, OwnedFd}, raw::c_void}, ptr::NonNull};
 
-use nix::{sys::memfd::{memfd_create, MFdFlags}, unistd::ftruncate};
+use nix::{
+    libc::{PROT_READ, PROT_WRITE}, sys::{memfd::{memfd_create, MFdFlags}, mman::{MapFlags, ProtFlags}}, unistd::ftruncate
+};
 
 pub fn create_fd(size: i32) -> OwnedFd {
     let file_descriptor = memfd_create("wl_buf", MFdFlags::empty()).unwrap();
@@ -9,4 +11,22 @@ pub fn create_fd(size: i32) -> OwnedFd {
     ftruncate(file_descriptor.as_fd(), size as i64).unwrap();
 
     file_descriptor
+}
+
+pub fn create_mmap(size: usize, fd: BorrowedFd) -> Option<NonNull<c_void>> {
+    unsafe {
+        let mmap_result = nix::sys::mman::mmap(
+            None,
+            NonZeroUsize::new(size as usize).unwrap(),
+            ProtFlags::from_bits_truncate(PROT_READ | PROT_WRITE),
+            MapFlags::MAP_SHARED,
+            fd.as_fd(),
+            0,
+        );
+
+        match mmap_result {
+            Ok(ptr) => Some(ptr),
+            Err(_) => None,
+        }
+    }
 }
