@@ -1,0 +1,10 @@
+[package]
+name = "ffmpeg-encoder"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+
+[build-dependencies]
+cc = "1.2.32"
+pkg-config = "0.3.32"

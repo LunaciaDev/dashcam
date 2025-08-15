@@ -1,3 +1,3 @@
 fn main() {
-    wl_capture::test();
+    ffmpeg_encoder::test();
 }

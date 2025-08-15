@@ -2,6 +2,8 @@
     "recommendations": [
         // Rust Language Support
         "rust-lang.rust-analyzer",
+        // C Language Support
+        "llvm-vs-code-extensions.vscode-clangd",
         // For debugging Rust apps
         "vadimcn.vscode-lldb",
     ]
