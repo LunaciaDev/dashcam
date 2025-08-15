@@ -75,18 +75,41 @@ pub fn extract_frames_from_mmap(
 
             for x in 0..width {
                 // Check out the enum definition for the byte layout
+                // We will be supporting 8-bit RGBA and variants only for now.
                 match format {
-                    Format::Argb8888 => {
+                    // 64-bit RGBA/X 16:16:16:16 FP
+                    Format::Xrgb16161616f => todo!(),
+                    Format::Xbgr16161616f => todo!(),
+                    Format::Argb16161616f => todo!(),
+                    Format::Abgr16161616f => todo!(),
+
+                    // 64-bit RGBA/X 16:16:16:16
+                    Format::Xrgb16161616 => todo!(),
+                    Format::Xbgr16161616 => todo!(),
+                    Format::Argb16161616 => todo!(),
+                    Format::Abgr16161616 => todo!(),
+
+                    // 32-bit RGBA/X 8:8:8:8
+                    Format::Rgbx8888 => {
                         let col_ptr = row_ptr.add(x * 4);
 
                         row_vec.push(RGBAPixel {
-                            a: *(col_ptr.add(3)),
-                            r: *(col_ptr.add(2)),
-                            g: *(col_ptr.add(1)),
-                            b: *(col_ptr),
+                            r: *(col_ptr.add(3)),
+                            g: *(col_ptr.add(2)),
+                            b: *(col_ptr.add(1)),
+                            a: 0xFF,
                         });
                     }
+                    Format::Bgrx8888 => {
+                        let col_ptr = row_ptr.add(x * 4);
 
+                        row_vec.push(RGBAPixel {
+                            b: *(col_ptr.add(3)),
+                            g: *(col_ptr.add(2)),
+                            r: *(col_ptr.add(1)),
+                            a: 0xFF,
+                        });
+                    }
                     Format::Xrgb8888 => {
                         let col_ptr = row_ptr.add(x * 4);
 
@@ -97,7 +120,6 @@ pub fn extract_frames_from_mmap(
                             b: *(col_ptr),
                         });
                     }
-
                     Format::Xbgr8888 => {
                         let col_ptr = row_ptr.add(x * 4);
 
@@ -108,6 +130,110 @@ pub fn extract_frames_from_mmap(
                             r: *(col_ptr),
                         });
                     }
+
+                    Format::Rgba8888 => {
+                        let col_ptr = row_ptr.add(x * 4);
+
+                        row_vec.push(RGBAPixel {
+                            r: *(col_ptr.add(3)),
+                            g: *(col_ptr.add(2)),
+                            b: *(col_ptr.add(1)),
+                            a: *(col_ptr),
+                        });
+                    }
+                    Format::Bgra8888 => {
+                        let col_ptr = row_ptr.add(x * 4);
+
+                        row_vec.push(RGBAPixel {
+                            b: *(col_ptr.add(3)),
+                            g: *(col_ptr.add(2)),
+                            r: *(col_ptr.add(1)),
+                            a: *(col_ptr),
+                        });
+                    }
+                    Format::Argb8888 => {
+                        let col_ptr = row_ptr.add(x * 4);
+
+                        row_vec.push(RGBAPixel {
+                            a: *(col_ptr.add(3)),
+                            r: *(col_ptr.add(2)),
+                            g: *(col_ptr.add(1)),
+                            b: *(col_ptr),
+                        });
+                    }
+                    Format::Abgr8888 => {
+                        let col_ptr = row_ptr.add(x * 4);
+
+                        row_vec.push(RGBAPixel {
+                            a: *(col_ptr.add(3)),
+                            b: *(col_ptr.add(2)),
+                            g: *(col_ptr.add(1)),
+                            r: *(col_ptr),
+                        });
+                    }
+
+                    // 32-bit RGBA/X 10:10:10:2
+                    Format::Xrgb2101010 => todo!(),
+                    Format::Xbgr2101010 => todo!(),
+                    Format::Rgbx1010102 => todo!(),
+                    Format::Bgrx1010102 => todo!(),
+
+                    Format::Argb2101010 => todo!(),
+                    Format::Abgr2101010 => todo!(),
+                    Format::Rgba1010102 => todo!(),
+                    Format::Bgra1010102 => todo!(),
+
+                    // 24-bit RGB 8:8:8
+                    Format::Rgb888 => {
+                        let col_ptr = row_ptr.add(x * 3);
+
+                        row_vec.push(RGBAPixel {
+                            r: *(col_ptr.add(2)),
+                            g: *(col_ptr.add(1)),
+                            b: *(col_ptr),
+                            a: 0xFF,
+                        });
+                    }
+                    Format::Bgr888 => {
+                        let col_ptr = row_ptr.add(x * 3);
+
+                        row_vec.push(RGBAPixel {
+                            b: *(col_ptr.add(2)),
+                            g: *(col_ptr.add(1)),
+                            r: *(col_ptr),
+                            a: 0xFF,
+                        });
+                    }
+
+                    // 16-bit RGBA/X 4:4:4:4
+                    Format::Rgbx4444 => todo!(),
+                    Format::Bgrx4444 => todo!(),
+                    Format::Xrgb4444 => todo!(),
+                    Format::Xbgr4444 => todo!(),
+
+                    Format::Rgba4444 => todo!(),
+                    Format::Bgra4444 => todo!(),
+                    Format::Argb4444 => todo!(),
+                    Format::Abgr4444 => todo!(),
+
+                    // 16-bit RGBA/X 5:5:5:1
+                    Format::Rgbx5551 => todo!(),
+                    Format::Bgrx5551 => todo!(),
+                    Format::Xrgb1555 => todo!(),
+                    Format::Xbgr1555 => todo!(),
+
+                    Format::Rgba5551 => todo!(),
+                    Format::Bgra5551 => todo!(),
+                    Format::Argb1555 => todo!(),
+                    Format::Abgr1555 => todo!(),
+
+                    // 8-bit RGB 3:3:2
+                    Format::Rgb332 => todo!(),
+                    Format::Bgr233 => todo!(),
+
+                    // 8-bit RGB 5:6:5
+                    Format::Rgb565 => todo!(),
+                    Format::Bgr565 => todo!(),
 
                     _ => {
                         panic!("Unsupported format!");

@@ -211,7 +211,7 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for Data {
                 width,
                 height,
             } => {
-                panic!("Unimplemented copy_with_damage")
+                println!("Unimplemented copy_with_damage")
             }
 
             zwlr_screencopy_frame_v1::Event::LinuxDmabuf {
@@ -274,6 +274,7 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for Data {
                 let ptr = state.result_raw_ptr.as_ref().unwrap();
                 let frame_config = state.result_config.as_ref().unwrap();
 
+                // [TODO]: Replace with emitting the decoded format for an encoder
                 let pixel_vec = extract_frames_from_mmap(ptr, frame_config);
 
                 state.zwlr_screencopy_frame.as_ref().unwrap().destroy();
@@ -317,13 +318,14 @@ pub fn test() {
         panic!("Support for wl_shm is not announced. Exiting.");
     }
 
-    let scrpy_mn = data.zwlr_screencopy_manager.as_ref().unwrap();
-    let output = data.wl_output.as_ref().unwrap();
-
-    data.zwlr_screencopy_frame = Some(scrpy_mn.capture_output(1, &output, &qh, ()));
-
     loop {
-        sleep(Duration::new(1, 0));
+        {
+            let scrpy_mn = data.zwlr_screencopy_manager.as_ref().unwrap();
+            let output = data.wl_output.as_ref().unwrap();
+            data.zwlr_screencopy_frame = Some(scrpy_mn.capture_output(1, &output, &qh, ()));
+        }
+
         event_queue.blocking_dispatch(&mut data).unwrap();
+        sleep(Duration::new(1, 0));
     }
 }
