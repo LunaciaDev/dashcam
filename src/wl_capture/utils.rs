@@ -17,7 +17,7 @@ use nix::{
 };
 use wayland_client::protocol::wl_shm::Format;
 
-use crate::BufferConfig;
+use super::lib::BufferConfig;
 
 pub fn create_fd(size: i32) -> OwnedFd {
     let file_descriptor = memfd_create("wl_buf", MFdFlags::empty()).unwrap();

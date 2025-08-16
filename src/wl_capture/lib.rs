@@ -21,9 +21,7 @@ use wayland_protocols_wlr::screencopy::v1::client::{
     zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1,
 };
 
-use crate::utils::{create_fd, create_mmap, extract_frames_from_mmap};
-
-mod utils;
+use crate::wl_capture::utils::{create_fd, create_mmap, extract_frames_from_mmap};
 
 struct Data {
     zwlr_screencopy_manager: Option<ZwlrScreencopyManagerV1>,
@@ -53,11 +51,11 @@ impl Default for Data {
     }
 }
 
-struct BufferConfig {
-    format: Format,
-    width: u32,
-    height: u32,
-    stride: u32,
+pub struct BufferConfig {
+    pub format: Format,
+    pub width: u32,
+    pub height: u32,
+    pub stride: u32,
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for Data {

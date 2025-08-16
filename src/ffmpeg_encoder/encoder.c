@@ -35,8 +35,6 @@
 #include "libavutil/mem.h"
 #include "libavutil/pixfmt.h"
 #include "libavutil/rational.h"
-#include "libswresample/swresample.h"
-#include "libswscale/swscale.h"
 
 typedef struct OutputStream {
     AVStream          *st;
@@ -51,9 +49,6 @@ typedef struct OutputStream {
     AVPacket          *tmp_pkt;
 
     float              t, tincr, tincr2;
-
-    struct SwsContext *sws_ctx;
-    struct SwrContext *swr_ctx;
 } OutputStream;
 
 void add_stream(
@@ -285,8 +280,6 @@ static void close_stream(AVFormatContext *oc, OutputStream *stream) {
     avcodec_free_context(&stream->enc);
     av_frame_free(&stream->frame);
     av_packet_free(&stream->tmp_pkt);
-    sws_freeContext(stream->sws_ctx);
-    swr_free(&stream->swr_ctx);
 }
 
 int start_encoder() {
@@ -336,6 +329,9 @@ int start_encoder() {
     }
 
     close_stream(output_context, &video_stream);
+
+    // free the IO context
+    avio_context_free(&io_context);
 
     // free the output context
     avformat_free_context(output_context);
