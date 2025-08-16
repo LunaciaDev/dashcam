@@ -1,0 +1,14 @@
+BasedOnStyle: Google
+
+IndentWidth: 4
+AlignAfterOpenBracket: BlockIndent
+AlignConsecutiveDeclarations:
+    Enabled: true
+    AcrossEmptyLines: true
+    AcrossComments: true
+AlignOperands: AlignAfterOperator
+UseTab: Never
+
+BreakBeforeBraces: Attach
+AllowAllParametersOfDeclarationOnNextLine: false
+BinPackParameters: false

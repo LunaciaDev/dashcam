@@ -2,7 +2,7 @@ fn main() {
     let mut cfg = cc::Build::new();
     cfg.file("src/encoder.c");
 
-    let libraries = ["libavutil"];
+    let libraries = ["libavutil", "libavcodec", "libavformat", "libswresample", "libswscale"];
 
     for library in libraries {
         let flags = pkg_config::Config::new().probe(library).unwrap();

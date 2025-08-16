@@ -1,9 +1,9 @@
 unsafe extern "C" {
-    fn hello_world();
+    fn start_encoder();
 }
 
 pub fn test() {
     unsafe {
-        hello_world();
+        start_encoder();
     }
 }

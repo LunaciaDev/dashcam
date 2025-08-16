@@ -6,7 +6,7 @@ RUN echo install_weak_deps=False >> /etc/dnf/dnf.conf && \
 
 # Enable rpmfusion
 RUN dnf install -y https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-$(rpm -E %fedora).noarch.rpm && \
-    dnf install clang ffmpeg-devel sway wlr-protocols-devel bear lld -y && \
+    dnf install clang ffmpeg ffmpeg-devel sway wlr-protocols-devel bear lld -y && \
     dnf clean all && rm -rf /var/cache/dnf
 
 # Manually install eza

@@ -76,6 +76,10 @@ pub fn extract_frames_from_mmap(
             for x in 0..width {
                 // Check out the enum definition for the byte layout
                 // We will be supporting 8-bit RGBA and variants only for now.
+                // [TODO]: Check each Format for their equivalent in libav
+                // There are matches - we need not do parsing if it is the case,
+                // or be able to find "close enough" formats to coerce to
+                // to reduce the parsing cost.
                 match format {
                     // 64-bit RGBA/X 16:16:16:16 FP
                     Format::Xrgb16161616f => todo!(),
