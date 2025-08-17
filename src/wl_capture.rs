@@ -1,4 +1,5 @@
-mod lib;
 mod utils;
+mod core;
+mod events;
 
-pub use lib::test;
+pub use core::start;

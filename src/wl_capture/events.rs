@@ -1,54 +1,39 @@
 use std::{
     os::{fd::AsFd, raw::c_void},
     ptr::NonNull,
-    thread::sleep,
-    time::Duration,
 };
 
 use wayland_client::{
     Connection, Dispatch, QueueHandle, WEnum,
     protocol::{
         wl_buffer::WlBuffer,
-        wl_output::WlOutput,
+        wl_output::{self, Mode, WlOutput},
         wl_registry,
         wl_shm::{Format, WlShm},
         wl_shm_pool::WlShmPool,
     },
 };
-
 use wayland_protocols_wlr::screencopy::v1::client::{
     zwlr_screencopy_frame_v1::{self, ZwlrScreencopyFrameV1},
     zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1,
 };
 
-use crate::wl_capture::utils::{create_fd, create_mmap, extract_frames_from_mmap};
+use crate::wl_capture::utils::{create_fd, create_mmap};
 
-struct Data {
-    zwlr_screencopy_manager: Option<ZwlrScreencopyManagerV1>,
-    zwlr_screencopy_frame: Option<ZwlrScreencopyFrameV1>,
+#[derive(Default)]
+pub struct Data {
+    pub screen_width: i32,
+    pub screen_height: i32,
+    pub zwlr_screencopy_manager: Option<ZwlrScreencopyManagerV1>,
+    pub zwlr_screencopy_frame: Option<ZwlrScreencopyFrameV1>,
 
-    wl_output: Option<WlOutput>,
-    wl_shm: Option<WlShm>,
-    wl_shm_pool: Option<WlShmPool>,
+    pub wl_output: Option<WlOutput>,
+    pub wl_shm: Option<WlShm>,
+    pub wl_shm_pool: Option<WlShmPool>,
 
-    result_buffer: Option<WlBuffer>,
-    result_config: Option<BufferConfig>,
-    result_raw_ptr: Option<NonNull<c_void>>,
-}
-
-impl Default for Data {
-    fn default() -> Self {
-        Data {
-            zwlr_screencopy_manager: None,
-            zwlr_screencopy_frame: None,
-            wl_output: None,
-            wl_shm: None,
-            wl_shm_pool: None,
-            result_raw_ptr: None,
-            result_buffer: None,
-            result_config: None,
-        }
-    }
+    pub result_buffer: Option<WlBuffer>,
+    pub result_config: Option<BufferConfig>,
+    pub result_raw_ptr: Option<NonNull<c_void>>,
 }
 
 pub struct BufferConfig {
@@ -63,7 +48,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for Data {
         state: &mut Self,
         registry: &wl_registry::WlRegistry,
         event: wl_registry::Event,
-        data: &(),
+        _data: &(),
         _conn: &Connection,
         qhandle: &QueueHandle<Data>,
     ) {
@@ -76,17 +61,16 @@ impl Dispatch<wl_registry::WlRegistry, ()> for Data {
             // we depend directly on v3 of screencopy
             if interface == "zwlr_screencopy_manager_v1" && version == 3 {
                 state.zwlr_screencopy_manager = Some(
-                    registry.bind::<ZwlrScreencopyManagerV1, _, _>(name, version, qhandle, *data),
+                    registry.bind::<ZwlrScreencopyManagerV1, _, _>(name, version, qhandle, ()),
                 );
             }
 
             if interface == "wl_output" {
-                state.wl_output =
-                    Some(registry.bind::<WlOutput, _, _>(name, version, qhandle, *data));
+                state.wl_output = Some(registry.bind::<WlOutput, _, _>(name, version, qhandle, ()));
             }
 
             if interface == "wl_shm" {
-                state.wl_shm = Some(registry.bind::<WlShm, _, _>(name, version, qhandle, *data));
+                state.wl_shm = Some(registry.bind::<WlShm, _, _>(name, version, qhandle, ()));
             }
         }
     }
@@ -94,14 +78,24 @@ impl Dispatch<wl_registry::WlRegistry, ()> for Data {
 
 impl Dispatch<WlOutput, ()> for Data {
     fn event(
-        _state: &mut Self,
+        state: &mut Self,
         _proxy: &WlOutput,
-        _event: <WlOutput as wayland_client::Proxy>::Event,
+        event: <WlOutput as wayland_client::Proxy>::Event,
         _data: &(),
         _conn: &Connection,
         _qhandle: &QueueHandle<Self>,
     ) {
-        // we are also not interested in any of their event yet.
+        if let wl_output::Event::Mode {
+            flags,
+            width,
+            height,
+            refresh: _,
+        } = event
+            && let WEnum::Value(Mode::Current) = flags
+        {
+            state.screen_width = width;
+            state.screen_height = height;
+        }
     }
 }
 
@@ -171,7 +165,7 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for Data {
         state: &mut Self,
         _proxy: &ZwlrScreencopyFrameV1,
         event: <ZwlrScreencopyFrameV1 as wayland_client::Proxy>::Event,
-        data: &(),
+        _data: &(),
         _conn: &Connection,
         qhandle: &QueueHandle<Self>,
     ) {
@@ -193,9 +187,9 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for Data {
 
                 state.result_config = Some(BufferConfig {
                     format: selected_format.unwrap(),
-                    width: width,
-                    height: height,
-                    stride: stride,
+                    width,
+                    height,
+                    stride,
                 });
             }
 
@@ -227,12 +221,12 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for Data {
                 if state.wl_shm_pool.is_none() {
                     let size = buffer_cfg.height as i32 * buffer_cfg.stride as i32;
                     let fd = create_fd(size);
-                    let shm_pool = state.wl_shm.as_ref().unwrap().create_pool(
-                        fd.as_fd(),
-                        size,
-                        qhandle,
-                        *data,
-                    );
+                    let shm_pool =
+                        state
+                            .wl_shm
+                            .as_ref()
+                            .unwrap()
+                            .create_pool(fd.as_fd(), size, qhandle, ());
 
                     state.result_raw_ptr = create_mmap(size as usize, fd.as_fd());
 
@@ -253,14 +247,14 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for Data {
                     buffer_cfg.stride as i32,
                     buffer_cfg.format,
                     qhandle,
-                    *data,
+                    (),
                 ));
 
                 state
                     .zwlr_screencopy_frame
                     .as_ref()
                     .unwrap()
-                    .copy(&state.result_buffer.as_ref().unwrap());
+                    .copy(state.result_buffer.as_ref().unwrap());
             }
 
             zwlr_screencopy_frame_v1::Event::Ready {
@@ -273,7 +267,6 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for Data {
                 let frame_config = state.result_config.as_ref().unwrap();
 
                 // [TODO]: Replace with emitting the decoded format for an encoder
-                let pixel_vec = extract_frames_from_mmap(ptr, frame_config);
 
                 state.zwlr_screencopy_frame.as_ref().unwrap().destroy();
                 state.zwlr_screencopy_frame = None;
@@ -290,40 +283,5 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for Data {
                 panic!("Unhandled event!");
             }
         }
-    }
-}
-
-pub fn test() {
-    let conn = Connection::connect_to_env().unwrap();
-    let display = conn.display();
-    let mut data: Data = Data::default();
-
-    let mut event_queue = conn.new_event_queue();
-    let qh = event_queue.handle();
-    let _registry = display.get_registry(&qh, ());
-
-    event_queue.roundtrip(&mut data).unwrap();
-
-    if data.zwlr_screencopy_manager.is_none() {
-        panic!("Support for wlr_screencopy is not announced. Exiting.");
-    }
-
-    if data.wl_output.is_none() {
-        panic!("Support for wl_output is not announced. Exiting.");
-    }
-
-    if data.wl_shm.is_none() {
-        panic!("Support for wl_shm is not announced. Exiting.");
-    }
-
-    loop {
-        {
-            let scrpy_mn = data.zwlr_screencopy_manager.as_ref().unwrap();
-            let output = data.wl_output.as_ref().unwrap();
-            data.zwlr_screencopy_frame = Some(scrpy_mn.capture_output(1, &output, &qh, ()));
-        }
-
-        event_queue.blocking_dispatch(&mut data).unwrap();
-        sleep(Duration::new(1, 0));
     }
 }
