@@ -5,13 +5,15 @@ include!(concat!(env!("OUT_DIR"), "/libav_pixfmt.rs"));
 
 use wayland_client::protocol::wl_shm::Format;
 
-unsafe extern "C" {
-    fn start_encoder();
+mod encoder_ffi {
+    unsafe extern "C" {
+        pub unsafe fn initialize_encoder(width: i32, height: i32);
+    }
 }
 
-pub fn test() {
+pub fn initialize_encoder(width: i32, height: i32) {
     unsafe {
-        start_encoder();
+        encoder_ffi::initialize_encoder(width, height);
     }
 }
 

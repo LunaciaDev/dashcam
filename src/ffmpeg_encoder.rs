@@ -1,3 +1,3 @@
-mod lib;
+mod core;
 
-pub use lib::test;
+pub use core::initialize_encoder;

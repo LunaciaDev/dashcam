@@ -1,6 +1,6 @@
 #ifndef __ENCODER_H__
 #define __ENCODER_H__
 
-int start_encoder();
+void initialize_encoder(int width, int height);
 
 #endif

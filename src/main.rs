@@ -2,6 +2,7 @@ use std::sync::{Arc, Barrier, mpsc};
 use std::thread;
 
 mod wl_capture;
+mod ffmpeg_encoder;
 
 #[derive(Default)]
 pub(crate) struct ScreenDimension {
@@ -28,4 +29,6 @@ fn main() {
     println!("{}", screen_dimension.height);
 
     start_barrier.wait();
+
+    ffmpeg_encoder::initialize_encoder(screen_dimension.width, screen_dimension.height);
 }
