@@ -12,6 +12,8 @@ sudo chown dev /run/user/dev
 chmod 0700 /run/user/dev
 # As sway created the socket named wayland-1 instead of wayland-0, we going to adjust the WAYLAND_DISPLAY envar
 echo export WAYLAND_DISPLAY=wayland-1 >> ~/.bashrc
+# Bindgen is also a neat tool for working with C FFI
+cargo install bindgen-cli
 
 # for some reason CodeLLDB is hard coded to /usr/bin/cargo, exposing cargo in $PATH or setting lldb.cargo is not working.
 sudo ln -s /home/dev/.cargo/bin/cargo /usr/bin/cargo

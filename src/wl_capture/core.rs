@@ -35,10 +35,13 @@ pub fn start(screensize_tx: Sender<ScreenDimension>, thread_barrier: Arc<Barrier
     thread_barrier.wait();
 
     loop {
+        // if we are ready to capture something new
+        // [TODO]: Create a ring buffer for this!
+        if data.zwlr_screencopy_frame.is_none()
         {
-            let scrpy_mn = data.zwlr_screencopy_manager.as_ref().unwrap();
+            let screencopy_manager = data.zwlr_screencopy_manager.as_ref().unwrap();
             let output = data.wl_output.as_ref().unwrap();
-            data.zwlr_screencopy_frame = Some(scrpy_mn.capture_output(1, output, &qh, ()));
+            data.zwlr_screencopy_frame = Some(screencopy_manager.capture_output(1, output, &qh, ()));
         }
 
         event_queue.blocking_dispatch(&mut data).unwrap();

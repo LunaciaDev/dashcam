@@ -1,10 +1,11 @@
 use std::sync::{Arc, Barrier, mpsc};
-use std::thread;
+use std::thread::{self, sleep};
+use std::time::Duration;
 
-mod wl_capture;
 mod ffmpeg_encoder;
+mod wl_capture;
 
-#[derive(Default)]
+#[derive(Default, Copy, Clone)]
 pub(crate) struct ScreenDimension {
     pub height: i32,
     pub width: i32,
@@ -12,7 +13,7 @@ pub(crate) struct ScreenDimension {
 
 fn main() {
     // we want all thread to start together, so when they are producing data, other are also ready to read those.
-    let start_barrier = Arc::new(Barrier::new(4));
+    let start_barrier = Arc::new(Barrier::new(2));
     let screen_dimension: ScreenDimension;
 
     {
@@ -25,10 +26,17 @@ fn main() {
         // after this, receiver is dropped, so the channel should close
     }
 
-    // here for now.
-    println!("{}", screen_dimension.height);
+    {
+        let screen_dimension_copy = screen_dimension;
+        thread::spawn(move || {
+            ffmpeg_encoder::start(screen_dimension_copy.width, screen_dimension_copy.height);
+        });
+    }
 
     start_barrier.wait();
 
-    ffmpeg_encoder::initialize_encoder(screen_dimension.width, screen_dimension.height);
+    // [TODO]: Poll for keyboard event, if we receive an event, interrupt, close all thread and exit.
+    loop {
+        sleep(Duration::new(5, 0));
+    }
 }

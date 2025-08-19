@@ -3,33 +3,47 @@
 #![allow(non_snake_case)]
 include!(concat!(env!("OUT_DIR"), "/libav_pixfmt.rs"));
 
+use std::{os::raw::c_void, ptr::NonNull};
+
 use wayland_client::protocol::wl_shm::Format;
 
 mod encoder_ffi {
+    use std::os::raw::c_void;
+
     unsafe extern "C" {
         pub unsafe fn initialize_encoder(width: i32, height: i32);
+        pub unsafe fn encode_frame(
+            frame_buffer: *mut c_void,
+            // the pointer to the buffer we have in Rust is &NonNull<c_void>
+            // the C function take a void*
+            timestamp_sec_low: u32,
+            timestamp_sec_high: u32,
+            timestamp_ns: u32,
+        );
     }
 }
 
-pub fn initialize_encoder(width: i32, height: i32) {
+pub fn encode_frame(frame_buffer: &NonNull<c_void>, tv_sec_hi: u32, tv_sec_lo: u32, tv_nsec: u32) {
+    unsafe {
+        encoder_ffi::encode_frame(frame_buffer.as_ptr(), tv_sec_hi, tv_sec_lo, tv_nsec);
+    }
+}
+
+pub fn start(width: i32, height: i32) {
     unsafe {
         encoder_ffi::initialize_encoder(width, height);
     }
+
+    /*
+    we need a way to receive the pointers to the buffers
+    and a channel to signal which buffer is ready.
+
+    A channel, where the first couple value sent are pointers
+    while later, send signals?
+
+    Also we need to scale up wl_capture to use multiple buffers.
+    */
 }
-
-/*
-We need these stuffs:
-
-- Height, Width of the capture frame
-- Pointer to the shm pages where the frame reside
-- Frame format
-- Encoding codec
-- Pointer to an IPC channel (Likely to be socket as we need bidirectional communication)
-  - Signal to this library that which shm pages is readable
-  - Send back that which shm pages has been read and can be reused
-
-init(uint8_t height, uint8_t width, void*[] shm_pages, AVFormat format, char* codec, void* ipc_channel);
-*/
 
 fn format_conversion(format: Format) -> i32 {
     match format {
