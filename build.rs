@@ -5,7 +5,7 @@ fn main() {
     let mut cfg = cc::Build::new();
     cfg.file("src/ffmpeg_encoder/encoder.c");
 
-    let libraries = ["libavutil", "libavcodec", "libavformat"];
+    let libraries = ["libavutil", "libavcodec", "libavformat", "libavfilter"];
 
     for library in libraries {
         let flags = pkg_config::Config::new().probe(library).unwrap();

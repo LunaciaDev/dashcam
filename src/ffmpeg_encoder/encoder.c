@@ -7,9 +7,14 @@
 #include "libavcodec/avcodec.h"
 #include "libavcodec/codec.h"
 #include "libavcodec/packet.h"
+#include "libavfilter/avfilter.h"
+#include "libavfilter/buffersink.h"
+#include "libavfilter/buffersrc.h"
 #include "libavformat/avformat.h"
 #include "libavutil/error.h"
 #include "libavutil/frame.h"
+#include "libavutil/mem.h"
+#include "libavutil/opt.h"
 #include "libavutil/pixfmt.h"
 #include "libavutil/rational.h"
 
@@ -20,8 +25,12 @@ static AVFormatContext      *output_context;
 static const AVCodec        *video_codec;
 static AVCodecContext       *video_codec_context;
 static AVFrame              *frame;
+static AVFrame              *filtered_frame;
 static AVPacket             *packet;
 static enum AVPixelFormat    pixel_format;
+static AVFilterContext      *buffersink_context;
+static AVFilterContext      *buffersource_context;
+static AVFilterGraph        *filter_graph;
 
 static uint32_t              base_sec_low;
 static uint32_t              base_sec_high;
@@ -102,12 +111,6 @@ void encode_frame(
     uint32_t ts_sec_high,
     uint32_t ts_ns
 ) {
-    // Make the frame writable, if needed.
-    if (av_frame_make_writable(frame) < 0) {
-        printf("Cannot make frame writable\n");
-        return;
-    }
-
     // [TODO]: Add recasting for each depth type
     {
         uint8_t *casted_buffer = frame_buffer;
@@ -117,11 +120,11 @@ void encode_frame(
             int frame_row_offset = y * frame_stride;
 
             for (int x = 0; x < video_codec_context->width; x++) {
-                int frame_col = frame_row_offset + 4 * x;
+                int frame_col = frame_row_offset + x * 4;
                 // we use linesize instead of width as the buffer may be padded
                 // to align.
                 //"libavutil/pixdesc.h" Use this to figure out how to fill data.
-                int pixel_location = y * frame->linesize[0] + x;
+                int pixel_location = y * frame->linesize[0] + x * 4;
 
                 // BGRABGRABGRA
                 frame->data[0][pixel_location] =
@@ -138,35 +141,141 @@ void encode_frame(
 
     frame->pts = timestamp_to_pts(ts_sec_low, ts_sec_high, ts_ns);
 
-    // now we have a complete av_frame
-    // [TODO]: Signal back that the buffer can be reused.
+    // now we have a complete av_frame, now make it compatiable with the codec.
 
-    if (avcodec_send_frame(video_codec_context, frame) < 0) {
-        printf("Failed to send frame.\n");
+    // feed the frame into the filtergraph
+    if (av_buffersrc_add_frame(buffersource_context, frame) < 0) {
+        printf("Failed to push frame to filters.\n");
         return;
     }
 
-    // frame is sent, now we receive packets
-    int ret = 0;
+    // pull out all frame from the filtergraph
+    while (1) {
+        int buffersink_ret = av_buffersink_get_frame(buffersink_context, filtered_frame);
 
-    while (ret >= 0) {
-        ret = avcodec_receive_packet(video_codec_context, packet);
-
-        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
-            // output has been fully read or no input received.
-            return;
-        } else if (ret < 0) {
-            // actual errors
-            printf("Error encountered while encoding.\n");
+        if (buffersink_ret == AVERROR(EAGAIN) || buffersink_ret == AVERROR_EOF) {
+            // we cannot get more frame from the sink. Stop pulling.
+            break;
+        }
+        else if (buffersink_ret < 0) {
+            // filter error!
+            printf("Error encountered while filtering.\n");
             return;
         }
 
-        // now we have a packet.
-        // [TODO]: Send the packet to the queue, and allocate a new one.
+        // we now have a frame filtered. Send it to the encoder.
 
-        // for now
-        av_packet_unref(packet);
+        if (avcodec_send_frame(video_codec_context, filtered_frame) < 0) {
+            printf("Failed to send frame.\n");
+            return;
+        }
+
+        // frame is sent, now we receive packets
+        int codec_ret = 0;
+
+        while (codec_ret >= 0) {
+            codec_ret = avcodec_receive_packet(video_codec_context, packet);
+
+            if (codec_ret == AVERROR(EAGAIN) || codec_ret == AVERROR_EOF) {
+                // output has been fully read or no input received.
+                return;
+            } else if (codec_ret < 0) {
+                // actual errors
+                printf("Error encountered while encoding.\n");
+                return;
+            }
+
+            // now we have a packet.
+            // [TODO]: Send the packet to the queue, and allocate a new one.
+
+            av_packet_unref(packet);
+        }
+
+        // reset filtered frame, prepares for next loop.
+        av_frame_unref(filtered_frame);
     }
+
+    // we are done with encoding this frame, reset it.
+    av_frame_unref(frame);
+}
+
+static void initialize_filter(enum AVPixelFormat format) {
+    // prepare filter IO
+    char            args[512];
+    const AVFilter *buffersrc = avfilter_get_by_name("buffer");
+    const AVFilter *buffersink = avfilter_get_by_name("buffersink");
+    const AVFilter *format_filter = avfilter_get_by_name("format");
+    AVFilterInOut  *input = avfilter_inout_alloc();
+    AVFilterInOut  *output = avfilter_inout_alloc();
+    AVRational      time_base = video_codec_context->time_base;
+
+    filter_graph = avfilter_graph_alloc();
+    av_opt_set(
+        filter_graph, "scale_sws_opts",
+        "flags=fast_bilinear:src_range=1:dst_range=1", 0
+    );
+
+    if (output == NULL || input == NULL || filter_graph == NULL) {
+        avfilter_inout_free(&input);
+        avfilter_inout_free(&output);
+        return;
+    }
+
+    // generate 'buffer' filter args
+    // this effectively locks the video_size.
+    snprintf(
+        args, sizeof(args),
+        "video_size=%dx%d:pix_fmt=%d:time_base=%d/%d:pixel_aspect=1/1",
+        video_codec_context->width, video_codec_context->height, format,
+        time_base.den, time_base.num
+    );
+
+    if (avfilter_graph_create_filter(
+            &buffersource_context, buffersrc, "in", args, NULL, filter_graph
+        ) < 0) {
+        avfilter_inout_free(&input);
+        avfilter_inout_free(&output);
+        return;
+    }
+
+    if (avfilter_graph_create_filter(
+            &buffersink_context, buffersink, "out", NULL, NULL, filter_graph
+        ) < 0) {
+        avfilter_inout_free(&input);
+        avfilter_inout_free(&output);
+        return;
+    }
+
+    // tell the sink what format we are expecting
+    const enum AVPixelFormat chosen_pix_fmt[] = {
+        AV_PIX_FMT_YUV420P, AV_PIX_FMT_NONE
+    };
+
+    av_opt_set_int_list(
+        buffersink_context, "pix_fmts", chosen_pix_fmt, AV_PIX_FMT_NONE,
+        AV_OPT_SEARCH_CHILDREN
+    );
+
+    // setup the pipeline
+    output->name = av_strdup("in");
+    output->filter_ctx = buffersource_context;
+    output->pad_idx = 0;
+    output->next = NULL;
+
+    input->name = av_strdup("out");
+    input->filter_ctx = buffersink_context;
+    input->pad_idx = 0;
+    input->next = NULL;
+
+    if (avfilter_graph_parse_ptr(filter_graph, NULL, &input, &output, NULL) <
+        0) {
+        avfilter_inout_free(&input);
+        avfilter_inout_free(&output);
+        return;
+    }
+
+    avfilter_inout_free(&input);
+    avfilter_inout_free(&output);
 }
 
 void initialize_encoder(int width, int height) {
@@ -214,6 +323,12 @@ void initialize_encoder(int width, int height) {
 
     frame = av_frame_alloc();
     if (frame == NULL) {
+        printf("Cannot allocate frame.\n");
+        return;
+    }
+
+    filtered_frame = av_frame_alloc();
+    if (filtered_frame == NULL) {
         printf("Cannot allocate frame.\n");
         return;
     }
