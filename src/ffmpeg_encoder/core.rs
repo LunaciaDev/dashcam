@@ -1,21 +1,50 @@
-#![allow(non_upper_case_globals)]
-#![allow(non_camel_case_types)]
-#![allow(non_snake_case)]
+#![allow(
+    non_upper_case_globals,
+    non_camel_case_types,
+    non_snake_case,
+    dead_code // we are okay with pulling the entirety of the pixfmt enum over, make it easier to maintain.
+)]
 include!(concat!(env!("OUT_DIR"), "/libav_pixfmt.rs"));
 
-use std::{os::raw::c_void, ptr::NonNull};
-
+use std::{
+    os::raw::c_void,
+    ptr::NonNull,
+    sync::{
+        Arc, Barrier,
+        mpsc::{Receiver, Sender},
+    },
+};
 use wayland_client::protocol::wl_shm::Format;
+
+pub struct FrameInfo {
+    pub frame_buffer: NonNull<c_void>,
+    pub frame_stride: u32,
+    pub frame_width: u32,
+    pub frame_height: u32,
+    pub frame_format: Format,
+    pub tv_sec_hi: u32,
+    pub tv_sec_lo: u32,
+    pub tv_nsec: u32,
+}
+
+// sharing a raw ptr is not allowed, unless we explicitly say so.
+// frame_buffer is not allowed to be written until this has released it
+// and synced via message passing, so we should be fineeee... perhaps.
+unsafe impl Send for FrameInfo {}
 
 mod encoder_ffi {
     use std::os::raw::c_void;
 
+    use crate::ffmpeg_encoder::core::AVPixelFormat;
+
     unsafe extern "C" {
         pub unsafe fn initialize_encoder(width: i32, height: i32);
-        pub unsafe fn encode_frame(
+        pub fn encode_frame(
             frame_buffer: *mut c_void,
-            // the pointer to the buffer we have in Rust is &NonNull<c_void>
-            // the C function take a void*
+            frame_stride: u32,
+            frame_width: u32,
+            frame_height: u32,
+            frame_format: AVPixelFormat,
             timestamp_sec_low: u32,
             timestamp_sec_high: u32,
             timestamp_ns: u32,
@@ -23,26 +52,38 @@ mod encoder_ffi {
     }
 }
 
-pub fn encode_frame(frame_buffer: &NonNull<c_void>, tv_sec_hi: u32, tv_sec_lo: u32, tv_nsec: u32) {
+pub fn encode_frame(frame_info: FrameInfo) {
     unsafe {
-        encoder_ffi::encode_frame(frame_buffer.as_ptr(), tv_sec_hi, tv_sec_lo, tv_nsec);
+        encoder_ffi::encode_frame(
+            frame_info.frame_buffer.as_ptr(),
+            frame_info.frame_stride,
+            frame_info.frame_width,
+            frame_info.frame_height,
+            format_conversion(frame_info.frame_format),
+            frame_info.tv_sec_lo,
+            frame_info.tv_sec_hi,
+            frame_info.tv_nsec,
+        );
     }
 }
 
-pub fn start(width: i32, height: i32) {
+pub fn start(
+    width: i32,
+    height: i32,
+    wlpacket_rx: Receiver<FrameInfo>,
+    wlresponse_tx: Sender<u8>,
+    barrier: Arc<Barrier>,
+) {
     unsafe {
         encoder_ffi::initialize_encoder(width, height);
     }
 
-    /*
-    we need a way to receive the pointers to the buffers
-    and a channel to signal which buffer is ready.
+    barrier.wait();
 
-    A channel, where the first couple value sent are pointers
-    while later, send signals?
-
-    Also we need to scale up wl_capture to use multiple buffers.
-    */
+    loop {
+        encode_frame(wlpacket_rx.recv().unwrap());
+        wlresponse_tx.send(0x44).unwrap();
+    }
 }
 
 fn format_conversion(format: Format) -> i32 {

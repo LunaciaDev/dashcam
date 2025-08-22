@@ -1,16 +1,16 @@
 use std::{
     num::NonZeroUsize,
     os::{
-        fd::{AsFd, BorrowedFd, OwnedFd},
+        fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd},
         raw::c_void,
     },
     ptr::NonNull,
 };
 
 use nix::{
-    libc::{PROT_READ, PROT_WRITE},
+    libc::{poll, pollfd, POLLIN, PROT_READ, PROT_WRITE},
     sys::{
-        memfd::{MFdFlags, memfd_create},
+        memfd::{memfd_create, MFdFlags},
         mman::{MapFlags, ProtFlags},
     },
     unistd::ftruncate,
@@ -25,6 +25,20 @@ pub fn create_fd(size: i32) -> OwnedFd {
     file_descriptor
 }
 
+pub fn poll_fd(fd: BorrowedFd) -> bool {
+    unsafe {
+        let mut fds = [pollfd {
+            fd: fd.as_raw_fd(),
+            events: POLLIN,
+            revents: 0,
+        }];
+
+        let res = poll(fds.as_mut_ptr(), 1, 0);
+
+        res > 0
+    }
+}
+
 pub fn create_mmap(size: usize, fd: BorrowedFd) -> Option<NonNull<c_void>> {
     unsafe {
         let mmap_result = nix::sys::mman::mmap(
@@ -37,5 +51,11 @@ pub fn create_mmap(size: usize, fd: BorrowedFd) -> Option<NonNull<c_void>> {
         );
 
         mmap_result.ok()
+    }
+}
+
+pub fn destroy_mmap(size: usize, ptr: NonNull<c_void>) {
+    unsafe {
+        nix::sys::mman::munmap(ptr, size).ok();
     }
 }

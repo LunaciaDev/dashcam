@@ -1,7 +1,4 @@
-use std::{
-    os::{fd::AsFd, raw::c_void},
-    ptr::NonNull,
-};
+use std::{os::raw::c_void, ptr::NonNull, sync::mpsc::Sender};
 
 use wayland_client::{
     Connection, Dispatch, QueueHandle, WEnum,
@@ -18,7 +15,7 @@ use wayland_protocols_wlr::screencopy::v1::client::{
     zwlr_screencopy_manager_v1::ZwlrScreencopyManagerV1,
 };
 
-use crate::wl_capture::utils::{create_fd, create_mmap};
+use crate::{ffmpeg_encoder::FrameInfo, wl_capture::shm_pool::ManagedBufferPool};
 
 #[derive(Default)]
 pub struct Data {
@@ -29,11 +26,11 @@ pub struct Data {
 
     pub wl_output: Option<WlOutput>,
     pub wl_shm: Option<WlShm>,
-    pub wl_shm_pool: Option<WlShmPool>,
 
-    pub result_buffer: Option<WlBuffer>,
-    pub result_config: Option<BufferConfig>,
-    pub result_raw_ptr: Option<NonNull<c_void>>,
+    pub buffer_pool: ManagedBufferPool,
+    pub buffer_config: Option<BufferConfig>,
+    pub buffer_raw_ptr: Option<NonNull<c_void>>,
+    pub buffer_send_channel: Option<Sender<FrameInfo>>,
 }
 
 pub struct BufferConfig {
@@ -141,7 +138,7 @@ impl Dispatch<WlShmPool, ()> for Data {
 
 impl Dispatch<WlBuffer, ()> for Data {
     fn event(
-        state: &mut Self,
+        _state: &mut Self,
         _proxy: &WlBuffer,
         event: <WlBuffer as wayland_client::Proxy>::Event,
         _data: &(),
@@ -150,8 +147,7 @@ impl Dispatch<WlBuffer, ()> for Data {
     ) {
         match event {
             wayland_client::protocol::wl_buffer::Event::Release => {
-                state.result_buffer.as_ref().unwrap().destroy();
-                state.result_buffer = None;
+                // println!("Buffer release event called")
             }
             _ => {
                 panic!("Unimplemented event!");
@@ -185,7 +181,7 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for Data {
                     WEnum::Unknown(_) => None,
                 };
 
-                state.result_config = Some(BufferConfig {
+                state.buffer_config = Some(BufferConfig {
                     format: selected_format.unwrap(),
                     width,
                     height,
@@ -194,7 +190,7 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for Data {
             }
 
             zwlr_screencopy_frame_v1::Event::Flags { flags } => {
-                println!("Flags event called");
+                // println!("Flags event called");
             }
 
             zwlr_screencopy_frame_v1::Event::Damage {
@@ -203,7 +199,7 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for Data {
                 width,
                 height,
             } => {
-                println!("Unimplemented copy_with_damage")
+                // println!("Unimplemented copy_with_damage")
             }
 
             zwlr_screencopy_frame_v1::Event::LinuxDmabuf {
@@ -212,49 +208,26 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for Data {
                 height,
             } => {
                 // I have no idea about this...
-                println!("Linux Dmabuf event called")
+                // println!("Linux Dmabuf event called")
             }
 
             zwlr_screencopy_frame_v1::Event::BufferDone => {
-                let buffer_cfg = state.result_config.as_ref().unwrap();
-
-                if state.wl_shm_pool.is_none() {
-                    let size = buffer_cfg.height as i32 * buffer_cfg.stride as i32;
-                    let fd = create_fd(size);
-                    let shm_pool =
-                        state
-                            .wl_shm
-                            .as_ref()
-                            .unwrap()
-                            .create_pool(fd.as_fd(), size, qhandle, ());
-
-                    state.result_raw_ptr = create_mmap(size as usize, fd.as_fd());
-
-                    if state.result_raw_ptr.is_none() {
-                        panic!("Failed to mmap data!");
-                    }
-
-                    state.wl_shm_pool = Some(shm_pool);
-                }
-
-                state.result_buffer = Some(state.wl_shm_pool.as_ref().unwrap().create_buffer(
-                    0,
-                    // [FIXME]: Potential overflow
-                    // technically not, since these value are given
-                    // to us, thus it should have been safe?
+                let buffer_cfg = state.buffer_config.as_ref().unwrap();
+                let (buffer, ptr) = state.buffer_pool.get_buffer(
                     buffer_cfg.width as i32,
                     buffer_cfg.height as i32,
                     buffer_cfg.stride as i32,
                     buffer_cfg.format,
+                    state.wl_shm.as_ref().unwrap(),
                     qhandle,
-                    (),
-                ));
+                ).unwrap();
 
+                state.buffer_raw_ptr = Some(ptr);
                 state
                     .zwlr_screencopy_frame
                     .as_ref()
                     .unwrap()
-                    .copy(state.result_buffer.as_ref().unwrap());
+                    .copy(buffer);
             }
 
             zwlr_screencopy_frame_v1::Event::Ready {
@@ -262,11 +235,26 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for Data {
                 tv_sec_lo,
                 tv_nsec,
             } => {
-                // We are dealing with a raw c pointer.
-                let ptr = state.result_raw_ptr.as_ref().unwrap();
-                let frame_config = state.result_config.as_ref().unwrap();
+                // construct our packet
+                let frame_config = state.buffer_config.as_ref().unwrap();
 
-                // [TODO]: Replace with emitting the decoded format for an encoder
+                let packet = FrameInfo {
+                    frame_buffer: *state.buffer_raw_ptr.as_ref().unwrap(),
+                    frame_stride: frame_config.stride,
+                    frame_width: frame_config.width,
+                    frame_height: frame_config.height,
+                    frame_format: frame_config.format,
+                    tv_sec_hi,
+                    tv_sec_lo,
+                    tv_nsec,
+                };
+
+                state
+                    .buffer_send_channel
+                    .as_ref()
+                    .unwrap()
+                    .send(packet)
+                    .unwrap();
 
                 state.zwlr_screencopy_frame.as_ref().unwrap().destroy();
                 state.zwlr_screencopy_frame = None;

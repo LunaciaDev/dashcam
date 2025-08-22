@@ -2,6 +2,8 @@ use std::sync::{Arc, Barrier, mpsc};
 use std::thread::{self, sleep};
 use std::time::Duration;
 
+use crate::ffmpeg_encoder::FrameInfo;
+
 mod ffmpeg_encoder;
 mod wl_capture;
 
@@ -13,14 +15,17 @@ pub(crate) struct ScreenDimension {
 
 fn main() {
     // we want all thread to start together, so when they are producing data, other are also ready to read those.
-    let start_barrier = Arc::new(Barrier::new(2));
+    let start_barrier = Arc::new(Barrier::new(3));
     let screen_dimension: ScreenDimension;
+
+    let (wlpacket_tx, wlpacket_rx) = mpsc::channel::<FrameInfo>();
+    let (wlresponse_tx, wlresponse_rx) = mpsc::channel::<u8>();
 
     {
         let (screensize_tx, screensize_rx) = mpsc::channel::<ScreenDimension>();
         let thread_barrier = start_barrier.clone();
         thread::spawn(|| {
-            wl_capture::start(screensize_tx, thread_barrier);
+            wl_capture::start(screensize_tx, wlpacket_tx, wlresponse_rx, thread_barrier);
         });
         screen_dimension = screensize_rx.recv().unwrap();
         // after this, receiver is dropped, so the channel should close
@@ -28,8 +33,15 @@ fn main() {
 
     {
         let screen_dimension_copy = screen_dimension;
+        let thread_barrier = start_barrier.clone();
         thread::spawn(move || {
-            ffmpeg_encoder::start(screen_dimension_copy.width, screen_dimension_copy.height);
+            ffmpeg_encoder::start(
+                screen_dimension_copy.width,
+                screen_dimension_copy.height,
+                wlpacket_rx,
+                wlresponse_tx,
+                thread_barrier
+            );
         });
     }
 
