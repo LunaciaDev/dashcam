@@ -4,8 +4,6 @@
     // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
     "version": "0.2.0",
     "configurations": [
-        // [TODO]: Provide a configuration that works
-        // For some god know why it cannot contact the compositor
         {
             "type": "lldb",
             "request": "launch",
@@ -20,6 +18,10 @@
                     "name": "dashcam",
                     "kind": "bin"
                 }
+            },
+            "env": {
+                "WAYLAND_DISPLAY": "wayland-1",
+                "XDG_RUNTIME_DIR": "/run/user/dev",
             },
             "args": [],
             "cwd": "${workspaceFolder}"

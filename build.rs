@@ -1,7 +1,9 @@
-use std::path::PathBuf;
 use std::env;
+use std::path::PathBuf;
 
 fn main() {
+    println!("cargo:rerun-if-changed=src/ffmpeg_encoder/encoder.c");
+
     let mut cfg = cc::Build::new();
     cfg.file("src/ffmpeg_encoder/encoder.c");
 
@@ -24,6 +26,7 @@ fn main() {
     // generate the needed header.
     let bindings = bindgen::Builder::default()
         .header("src/ffmpeg_encoder/libav_pixfmt.h")
+        .allowlist_type("AVPixelFormat")
         .clang_arg("-I/usr/include/ffmpeg")
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .generate()
