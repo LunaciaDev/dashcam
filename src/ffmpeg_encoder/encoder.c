@@ -11,6 +11,7 @@
 #include "libavfilter/buffersink.h"
 #include "libavfilter/buffersrc.h"
 #include "libavformat/avformat.h"
+#include "libavformat/avio.h"
 #include "libavutil/error.h"
 #include "libavutil/frame.h"
 #include "libavutil/mem.h"
@@ -20,22 +21,22 @@
 
 // **** GLOBALS ****
 
-static const AVOutputFormat *output_format;
+// OUTPUT STREAM
 static AVFormatContext      *output_context;
-static const AVCodec        *video_codec;
-static AVCodecContext       *video_codec_context;
-static AVFrame              *frame;
-static AVPacket             *packet;
-static enum AVPixelFormat    pixel_format;
+static const AVOutputFormat *output_format;
+static AVStream             *video_stream;
 
-static AVFrame              *filtered_frame;
-static AVFilterContext      *buffersink_context;
-static AVFilterContext      *buffersource_context;
-static AVFilterGraph        *filter_graph;
+// VIDEO STREAM
+static const AVCodec     *video_codec;
+static AVCodecContext    *video_codec_context;
+static AVPacket          *packet;
+static enum AVPixelFormat pixel_format;
 
-static uint32_t              base_sec_low;
-static uint32_t              base_sec_high;
-static uint32_t base_ns = 0x34342E35;  // magic number if this is unset
+static AVFilterContext   *buffersink_context;
+static AVFilterContext   *buffersource_context;
+static AVFilterGraph     *filter_graph;
+
+static int64_t            base_timestamp = -1;
 
 // **** END GLOBAL ****
 
@@ -48,15 +49,6 @@ static uint32_t base_ns = 0x34342E35;  // magic number if this is unset
 */
 static int64_t
 timestamp_to_pts(uint32_t sec_low, uint32_t sec_high, uint32_t ns) {
-    if (base_ns == 0x34342E35) {
-        base_sec_high = sec_high;
-        base_sec_low = sec_low;
-        base_ns = ns;
-        return 0;
-    }
-
-    int64_t result = sec_high - base_sec_high;
-
     /*
     high_diff store bit 33-64 of the seconds part of the timestamp.
     We want to multiply it by the divisor of the time_base to figure out the
@@ -76,26 +68,19 @@ timestamp_to_pts(uint32_t sec_low, uint32_t sec_high, uint32_t ns) {
 
     // overflow case
     // [TODO]: adjust based on time_base
-    if (result >> 25 != 0) {
+    if (sec_high >> 25 != 0) {
         return -1;
     }
 
-    // sec_high component
-    result = (result << 32) * 60;
+    int64_t second = ((uint64_t)sec_high << 32) | sec_low;
 
-    if (ns < base_ns) {
-        sec_low -= 1;
-        ns += 1000000000;
+    if (base_timestamp == -1) {
+        base_timestamp = second * 1000000000 + ns;
+        return 0;
     }
 
-    // sec_low component
-    result += (base_sec_low - sec_low) * 60;
-
-    // ns component
-    // [TODO]: adjust based on time_base
-    result += (ns - base_ns) * 60 / 1000000000;
-
-    return result;
+    return ((second * 1000000000 + ns) - base_timestamp) * 60 /
+           (int64_t)1000000000;
 }
 
 static void initialize_filter(enum AVPixelFormat format) {
@@ -165,8 +150,9 @@ static void initialize_filter(enum AVPixelFormat format) {
     input->pad_idx = 0;
     input->next = NULL;
 
-    if (avfilter_graph_parse_ptr(filter_graph, "format", &input, &output, NULL) <
-        0) {
+    if (avfilter_graph_parse_ptr(
+            filter_graph, "format", &input, &output, NULL
+        ) < 0) {
         avfilter_inout_free(&input);
         avfilter_inout_free(&output);
         return;
@@ -188,12 +174,15 @@ static void initialize_filter(enum AVPixelFormat format) {
 // buffer another function that dump the buffer into decoder and somehow mixes
 // both video and audio too.
 
-void encode_frame(
+static void internal_encode_frame(
     void              *frame_buffer,
     uint32_t           frame_stride,
     uint32_t           frame_width,
     uint32_t           frame_height,
     enum AVPixelFormat frame_format,
+
+    AVFrame           *frame,
+    AVFrame           *filtered_frame,
 
     uint32_t           ts_sec_low,
     uint32_t           ts_sec_high,
@@ -208,43 +197,9 @@ void encode_frame(
     frame->width = frame_width;
     frame->height = frame_height;
     frame->format = frame_format;
-    
-    if (av_frame_get_buffer(frame, 0) < 0) {
-        printf("Cannot allocate frame.\n");
-        return;
-    }
-
-    // [TODO]: Add recasting for each depth type
-    {
-        uint8_t *casted_buffer = frame_buffer;
-
-        // copying is forced here as we need to reuse the frame buffer later
-        for (int y = 0; y < video_codec_context->height; y++) {
-            int frame_row_offset = y * frame_stride;
-
-            for (int x = 0; x < video_codec_context->width; x++) {
-                int frame_col = frame_row_offset + x * 4;
-                // we use linesize instead of width as the buffer may be padded
-                // to align.
-                //"libavutil/pixdesc.h" Use this to figure out how to fill data.
-                int pixel_location = y * frame->linesize[0] + x * 4;
-
-                // BGRABGRABGRA
-                frame->data[0][pixel_location] =
-                    casted_buffer[frame_col];
-                frame->data[0][pixel_location + 1] =
-                    casted_buffer[frame_col + 1];
-                frame->data[0][pixel_location + 2] =
-                    casted_buffer[frame_col + 2];
-                frame->data[0][pixel_location + 3] =
-                    casted_buffer[frame_col + 3];
-            }
-        }
-    }
-
+    frame->data[0] = frame_buffer;
+    frame->linesize[0] = frame_stride;
     frame->pts = timestamp_to_pts(ts_sec_low, ts_sec_high, ts_ns);
-
-    // now we have a complete av_frame, now make it compatiable with the codec.
 
     // feed the frame into the filtergraph
     if (av_buffersrc_add_frame_flags(buffersource_context, frame, 0) < 0) {
@@ -259,7 +214,6 @@ void encode_frame(
 
         if (buffersink_ret == AVERROR(EAGAIN) ||
             buffersink_ret == AVERROR_EOF) {
-            // we cannot get more frame from the sink. Stop pulling.
             break;
         } else if (buffersink_ret < 0) {
             // filter error!
@@ -291,16 +245,49 @@ void encode_frame(
 
             // now we have a packet.
             // [TODO]: Send the packet to the queue, and allocate a new one.
-            printf("Packet emitted.\n");
 
-            av_packet_unref(packet);
+            av_packet_rescale_ts(
+                packet, video_codec_context->time_base, video_stream->time_base
+            );
+            packet->stream_index = video_stream->index;
+            av_interleaved_write_frame(output_context, packet);
+
+            // interleaved_write_frame reset our packet, so no unref necessary.
+            // av_packet_unref(packet);
         }
+    }
+}
 
-        // reset filtered frame, prepares for next loop.
-        av_frame_unref(filtered_frame);
+void encode_frame(
+    void              *frame_buffer,
+    uint32_t           frame_stride,
+    uint32_t           frame_width,
+    uint32_t           frame_height,
+    enum AVPixelFormat frame_format,
+
+    uint32_t           ts_sec_low,
+    uint32_t           ts_sec_high,
+    uint32_t           ts_ns
+) {
+    AVFrame *frame = av_frame_alloc();
+    if (frame == NULL) {
+        printf("Cannot allocate frame.\n");
+        return;
     }
 
-    av_frame_unref(frame);
+    AVFrame *filtered_frame = av_frame_alloc();
+    if (filtered_frame == NULL) {
+        printf("Cannot allocate frame.\n");
+        return;
+    }
+
+    internal_encode_frame(
+        frame_buffer, frame_stride, frame_width, frame_height, frame_format,
+        frame, filtered_frame, ts_sec_low, ts_sec_high, ts_ns
+    );
+
+    av_frame_free(&frame);
+    av_frame_free(&filtered_frame);
 }
 
 void initialize_encoder(int width, int height) {
@@ -335,7 +322,7 @@ void initialize_encoder(int width, int height) {
     // if we need CFR, set this.
     // video_codec_context->framerate = (AVRational){60, 1};
 
-    video_codec_context->gop_size = 5;
+    video_codec_context->gop_size = 12;
     // Also allow setting this!
     video_codec_context->pix_fmt = AV_PIX_FMT_YUV420P;
     pixel_format = AV_PIX_FMT_YUV420P;
@@ -345,15 +332,48 @@ void initialize_encoder(int width, int height) {
         return;
     }
 
-    frame = av_frame_alloc();
-    if (frame == NULL) {
-        printf("Cannot allocate frame.\n");
+    // output context
+
+    avformat_alloc_output_context2(&output_context, NULL, NULL, "output.mkv");
+    if (output_context == NULL) {
+        printf("Unrecognized container format, using matroska as fallback.");
+        avformat_alloc_output_context2(
+            &output_context, NULL, "matroska", "output.mkv"
+        );
+    }
+    if (output_context == NULL) {
         return;
     }
 
-    filtered_frame = av_frame_alloc();
-    if (filtered_frame == NULL) {
-        printf("Cannot allocate frame.\n");
+    output_context->video_codec = video_codec;
+    output_format = output_context->oformat;
+
+    video_stream = avformat_new_stream(output_context, video_codec);
+    if (video_stream == NULL) {
+        printf("Cannot allocate stream");
+        return;
+    }
+    video_stream->id = output_context->nb_streams - 1;
+
+    avcodec_parameters_from_context(
+        video_stream->codecpar, video_codec_context
+    );
+
+    if (output_context->oformat->flags & AVFMT_GLOBALHEADER) {
+        video_codec_context->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+    }
+
+    video_stream->time_base = video_codec_context->time_base;
+
+    if (!(output_format->flags & AVFMT_NOFILE)) {
+        if (avio_open(&output_context->pb, "output.mkv", AVIO_FLAG_WRITE) < 0) {
+            printf("Cannot open AVIO context");
+            return;
+        }
+    }
+
+    if (avformat_write_header(output_context, NULL) < 0) {
+        printf("Cannot write header");
         return;
     }
 }

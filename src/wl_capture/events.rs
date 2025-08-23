@@ -271,7 +271,7 @@ impl Dispatch<ZwlrScreencopyFrameV1, ()> for Data {
                     .zwlr_screencopy_frame
                     .as_ref()
                     .expect("The wlr_screencopy_frame must be set before this can be called.")
-                    .copy(buffer);
+                    .copy_with_damage(buffer);
             }
 
             zwlr_screencopy_frame_v1::Event::Ready {

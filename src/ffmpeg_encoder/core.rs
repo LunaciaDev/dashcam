@@ -107,16 +107,16 @@ pub fn start(
 
 fn format_conversion(format: Format) -> i32 {
     match format {
-        Format::Argb8888 => AVPixelFormat_AV_PIX_FMT_ARGB,
-        Format::Xrgb8888 => AVPixelFormat_AV_PIX_FMT_0RGB,
-        Format::Rgb888 => AVPixelFormat_AV_PIX_FMT_RGB24,
-        Format::Bgr888 => AVPixelFormat_AV_PIX_FMT_BGR24,
-        Format::Xbgr8888 => AVPixelFormat_AV_PIX_FMT_0BGR,
-        Format::Rgbx8888 => AVPixelFormat_AV_PIX_FMT_RGB0,
-        Format::Bgrx8888 => AVPixelFormat_AV_PIX_FMT_BGR0,
-        Format::Abgr8888 => AVPixelFormat_AV_PIX_FMT_ABGR,
-        Format::Rgba8888 => AVPixelFormat_AV_PIX_FMT_RGBA,
-        Format::Bgra8888 => AVPixelFormat_AV_PIX_FMT_BGRA,
+        Format::Argb8888 => AVPixelFormat_AV_PIX_FMT_BGRA,
+        Format::Xrgb8888 => AVPixelFormat_AV_PIX_FMT_BGR0,
+        Format::Rgb888 => AVPixelFormat_AV_PIX_FMT_BGR24,
+        Format::Bgr888 => AVPixelFormat_AV_PIX_FMT_RGB24,
+        Format::Xbgr8888 => AVPixelFormat_AV_PIX_FMT_RGB0,
+        Format::Rgbx8888 => AVPixelFormat_AV_PIX_FMT_0BGR,
+        Format::Bgrx8888 => AVPixelFormat_AV_PIX_FMT_0RGB,
+        Format::Abgr8888 => AVPixelFormat_AV_PIX_FMT_RGBA,
+        Format::Rgba8888 => AVPixelFormat_AV_PIX_FMT_ABGR,
+        Format::Bgra8888 => AVPixelFormat_AV_PIX_FMT_ARGB,
         _ => {
             panic!("Unsupported format!");
         }

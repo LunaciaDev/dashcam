@@ -67,6 +67,7 @@ fn launch() {
         if is_halt() {
             break;
         }
+
         sleep(Duration::new(5, 0));
     }
 }
