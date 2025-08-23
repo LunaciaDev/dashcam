@@ -8,9 +8,9 @@ use std::{
 };
 
 use nix::{
-    libc::{poll, pollfd, POLLIN, PROT_READ, PROT_WRITE},
+    libc::{POLLIN, PROT_READ, PROT_WRITE, poll, pollfd},
     sys::{
-        memfd::{memfd_create, MFdFlags},
+        memfd::{MFdFlags, memfd_create},
         mman::{MapFlags, ProtFlags},
     },
     unistd::ftruncate,

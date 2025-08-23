@@ -103,7 +103,6 @@ static void initialize_filter(enum AVPixelFormat format) {
     char            args[512];
     const AVFilter *buffersrc = avfilter_get_by_name("buffer");
     const AVFilter *buffersink = avfilter_get_by_name("buffersink");
-    const AVFilter *format_filter = avfilter_get_by_name("format");
     AVFilterInOut  *input = avfilter_inout_alloc();
     AVFilterInOut  *output = avfilter_inout_alloc();
     AVRational      time_base = video_codec_context->time_base;
@@ -232,13 +231,13 @@ void encode_frame(
 
                 // BGRABGRABGRA
                 frame->data[0][pixel_location] =
-                    ((uint8_t *)frame_buffer)[frame_col];
+                    casted_buffer[frame_col];
                 frame->data[0][pixel_location + 1] =
-                    ((uint8_t *)frame_buffer)[frame_col + 1];
+                    casted_buffer[frame_col + 1];
                 frame->data[0][pixel_location + 2] =
-                    ((uint8_t *)frame_buffer)[frame_col + 2];
+                    casted_buffer[frame_col + 2];
                 frame->data[0][pixel_location + 3] =
-                    ((uint8_t *)frame_buffer)[frame_col + 3];
+                    casted_buffer[frame_col + 3];
             }
         }
     }

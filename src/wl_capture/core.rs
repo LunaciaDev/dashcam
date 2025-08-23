@@ -1,16 +1,26 @@
-use crate::{ffmpeg_encoder::FrameInfo, wl_capture::{events::Data, utils::poll_fd}, ScreenDimension};
-use std::{os::fd::AsFd, sync::{
-    mpsc::{Receiver, Sender}, Arc, Barrier
-}};
+use crate::{
+    ScreenDimension,
+    ffmpeg_encoder::FrameInfo,
+    utils::{is_halt, set_halt},
+    wl_capture::{error::WlObjectError, events::Data, utils::poll_fd},
+};
+use std::{
+    error::Error,
+    os::fd::AsFd,
+    sync::{
+        Arc, Barrier,
+        mpsc::{Receiver, Sender},
+    },
+};
 use wayland_client::Connection;
 
-pub fn start(
+pub fn main(
     screensize_tx: Sender<ScreenDimension>,
     wlpacket_tx: Sender<FrameInfo>,
     wlresponse_rx: Receiver<u8>,
     thread_barrier: Arc<Barrier>,
-) {
-    let conn = Connection::connect_to_env().unwrap();
+) -> Result<(), Box<dyn Error>> {
+    let conn = Connection::connect_to_env()?;
     let display = conn.display();
     let mut data: Data = Data {
         buffer_send_channel: Some(wlpacket_tx),
@@ -23,23 +33,24 @@ pub fn start(
     let qh = event_queue.handle();
     let _registry = display.get_registry(&qh, ());
 
-    event_queue.roundtrip(&mut data).unwrap();
+    event_queue.roundtrip(&mut data)?;
 
     if data.zwlr_screencopy_manager.is_none() {
-        panic!("Support for wlr_screencopy is not announced. Exiting.");
+        return Err(Box::new(WlObjectError::MissingWlrScreencopy));
     }
 
     if data.wl_output.is_none() {
-        panic!("Support for wl_output is not announced. Exiting.");
+        return Err(Box::new(WlObjectError::MissingWlOutput));
     }
 
     if data.wl_shm.is_none() {
-        panic!("Support for wl_shm is not announced. Exiting.");
+        return Err(Box::new(WlObjectError::MissingWlShm));
     }
 
     loop {
         // we hold the initialization loop until we learned about the screen dimensions.
-        event_queue.blocking_dispatch(&mut data).unwrap();
+        event_queue.blocking_dispatch(&mut data)?;
+
         if data.screen_height != -1 && data.screen_width != -1 {
             break;
         }
@@ -50,25 +61,30 @@ pub fn start(
             height: data.screen_height,
             width: data.screen_width,
         })
-        .unwrap();
+        .expect("The receiver on main thread only deconstruct this after receiving the info.");
 
     thread_barrier.wait();
 
-    loop {
+    while !is_halt() {
         // Send all queued event to the compositor.
-        event_queue.flush().unwrap();
+        event_queue.flush()?;
 
-        let read_guard = event_queue.prepare_read().unwrap();
+        let read_guard = match event_queue.prepare_read() {
+            Some(s) => s,
+            None => {
+                // call dispatch_pending before invoking again.
+                event_queue.dispatch_pending(&mut data)?;
+                continue;
+            }
+        };
         let read_fd = read_guard.connection_fd();
-
         let wl_socket_ready = poll_fd(read_fd.as_fd());
 
         if wl_socket_ready {
             // consume the read guard
-            read_guard.read().unwrap();
-            event_queue.dispatch_pending(&mut data).unwrap();
-        }
-        else {
+            read_guard.read()?;
+            event_queue.dispatch_pending(&mut data)?;
+        } else {
             drop(read_guard);
         }
 
@@ -82,10 +98,37 @@ pub fn start(
 
         // if we are ready to capture something new
         if data.zwlr_screencopy_frame.is_none() && data.buffer_pool.has_free_buffer() {
-            let screencopy_manager = data.zwlr_screencopy_manager.as_ref().unwrap();
-            let output = data.wl_output.as_ref().unwrap();
+            let screencopy_manager = data
+                .zwlr_screencopy_manager
+                .as_ref()
+                .expect("The zwlr_screencopy_manager object cannot be None.");
+            let output = data
+                .wl_output
+                .as_ref()
+                .expect("The wl_output object cannot be None.");
             data.zwlr_screencopy_frame =
                 Some(screencopy_manager.capture_output(1, output, &qh, ()));
+        }
+    }
+
+    // we might have an error from the event system.
+    match data.event_error {
+        Some(err) => Err(err),
+        None => Ok(()),
+    }
+}
+
+pub fn start(
+    screensize_tx: Sender<ScreenDimension>,
+    wlpacket_tx: Sender<FrameInfo>,
+    wlresponse_rx: Receiver<u8>,
+    thread_barrier: Arc<Barrier>,
+) {
+    match main(screensize_tx, wlpacket_tx, wlresponse_rx, thread_barrier) {
+        Ok(_) => {}
+        Err(error) => {
+            eprintln!("{}", error);
+            set_halt();
         }
     }
 }

@@ -3,8 +3,10 @@ use std::thread::{self, sleep};
 use std::time::Duration;
 
 use crate::ffmpeg_encoder::FrameInfo;
+use crate::utils::is_halt;
 
 mod ffmpeg_encoder;
+mod utils;
 mod wl_capture;
 
 #[derive(Default, Copy, Clone)]
@@ -13,8 +15,9 @@ pub(crate) struct ScreenDimension {
     pub width: i32,
 }
 
-fn main() {
+fn launch() {
     // we want all thread to start together, so when they are producing data, other are also ready to read those.
+
     let start_barrier = Arc::new(Barrier::new(3));
     let screen_dimension: ScreenDimension;
 
@@ -25,9 +28,20 @@ fn main() {
         let (screensize_tx, screensize_rx) = mpsc::channel::<ScreenDimension>();
         let thread_barrier = start_barrier.clone();
         thread::spawn(|| {
-            wl_capture::start(screensize_tx, wlpacket_tx, wlresponse_rx, thread_barrier);
+            wl_capture::start(
+                screensize_tx,
+                wlpacket_tx,
+                wlresponse_rx,
+                thread_barrier,
+            );
         });
-        screen_dimension = screensize_rx.recv().unwrap();
+        screen_dimension = match screensize_rx.recv() {
+            Ok(s) => s,
+            Err(_) => {
+                // the capturing thread crashed.
+                return;
+            },
+        };
         // after this, receiver is dropped, so the channel should close
     }
 
@@ -40,7 +54,7 @@ fn main() {
                 screen_dimension_copy.height,
                 wlpacket_rx,
                 wlresponse_tx,
-                thread_barrier
+                thread_barrier,
             );
         });
     }
@@ -48,7 +62,17 @@ fn main() {
     start_barrier.wait();
 
     // [TODO]: Poll for keyboard event, if we receive an event, interrupt, close all thread and exit.
+    // to exit, set the halt to true. We use relaxed halting as it is fine for thread to close slightly later than actually closing, but allow faster read?
     loop {
+        if is_halt() {
+            break;
+        }
         sleep(Duration::new(5, 0));
     }
+}
+
+fn main() {
+    // [TODO]: Create a CLI for this.
+
+    launch();
 }

@@ -16,6 +16,8 @@ use std::{
 };
 use wayland_client::protocol::wl_shm::Format;
 
+use crate::utils::{is_halt, set_halt};
+
 pub struct FrameInfo {
     pub frame_buffer: NonNull<c_void>,
     pub frame_stride: u32,
@@ -80,9 +82,26 @@ pub fn start(
 
     barrier.wait();
 
-    loop {
-        encode_frame(wlpacket_rx.recv().unwrap());
-        wlresponse_tx.send(0x44).unwrap();
+    while !is_halt() {
+        let frame_info = match wlpacket_rx.recv() {
+            Ok(f) => f,
+            Err(_) => {
+                // the capturing thread crashed, so..
+                set_halt();
+                return;
+            }
+        };
+
+        encode_frame(frame_info);
+
+        match wlresponse_tx.send(0x44) {
+            Ok(f) => f,
+            Err(_) => {
+                // the capturing thread crashed, so..
+                set_halt();
+                return;
+            }
+        };
     }
 }
 
