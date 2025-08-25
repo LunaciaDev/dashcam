@@ -60,8 +60,8 @@ impl ManagedBufferPool {
         self.available_ptr != self.unavailable_ptr || !self.initialized
     }
 
-    pub fn bump_unavailable(&mut self) {
-        self.unavailable_ptr = (self.unavailable_ptr + 1) % self.size;
+    pub fn bump_unavailable(&mut self, amount: usize) {
+        self.unavailable_ptr = (self.unavailable_ptr + amount) % self.size;
     }
 
     pub fn get_buffer(

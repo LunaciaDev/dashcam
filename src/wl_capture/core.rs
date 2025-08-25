@@ -11,6 +11,8 @@ use std::{
         Arc, Barrier,
         mpsc::{Receiver, Sender},
     },
+    thread::sleep,
+    time::Duration,
 };
 use wayland_client::Connection;
 
@@ -92,23 +94,24 @@ pub fn main(
 
         // Receive all data from the other thread.
         // For each received packet, release the buffer associated
-        while wlresponse_rx.try_recv().is_ok() {
-            data.buffer_pool.bump_unavailable();
+        data.buffer_pool
+            .bump_unavailable(wlresponse_rx.try_recv().iter().len());
+
+        if !(data.zwlr_screencopy_frame.is_none() && data.buffer_pool.has_free_buffer()) {
+            sleep(Duration::from_millis(1));
+            continue;
         }
 
-        // if we are ready to capture something new
-        if data.zwlr_screencopy_frame.is_none() && data.buffer_pool.has_free_buffer() {
-            let screencopy_manager = data
-                .zwlr_screencopy_manager
-                .as_ref()
-                .expect("The zwlr_screencopy_manager object cannot be None.");
-            let output = data
-                .wl_output
-                .as_ref()
-                .expect("The wl_output object cannot be None.");
-            data.zwlr_screencopy_frame =
-                Some(screencopy_manager.capture_output(1, output, &qh, ()));
-        }
+        //we are ready to capture something new
+        let screencopy_manager = data
+            .zwlr_screencopy_manager
+            .as_ref()
+            .expect("The zwlr_screencopy_manager object cannot be None.");
+        let output = data
+            .wl_output
+            .as_ref()
+            .expect("The wl_output object cannot be None.");
+        data.zwlr_screencopy_frame = Some(screencopy_manager.capture_output(1, output, &qh, ()));
     }
 
     // we might have an error from the event system.

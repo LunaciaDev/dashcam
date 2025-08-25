@@ -31,6 +31,8 @@ static const AVCodec     *video_codec;
 static AVCodecContext    *video_codec_context;
 static AVPacket          *packet;
 static enum AVPixelFormat pixel_format;
+static AVFrame           *frame;
+static AVFrame           *filtered_frame;
 
 static AVFilterContext   *buffersink_context;
 static AVFilterContext   *buffersource_context;
@@ -181,9 +183,6 @@ static void internal_encode_frame(
     uint32_t           frame_height,
     enum AVPixelFormat frame_format,
 
-    AVFrame           *frame,
-    AVFrame           *filtered_frame,
-
     uint32_t           ts_sec_low,
     uint32_t           ts_sec_high,
     uint32_t           ts_ns
@@ -269,25 +268,13 @@ void encode_frame(
     uint32_t           ts_sec_high,
     uint32_t           ts_ns
 ) {
-    AVFrame *frame = av_frame_alloc();
-    if (frame == NULL) {
-        printf("Cannot allocate frame.\n");
-        return;
-    }
-
-    AVFrame *filtered_frame = av_frame_alloc();
-    if (filtered_frame == NULL) {
-        printf("Cannot allocate frame.\n");
-        return;
-    }
-
     internal_encode_frame(
         frame_buffer, frame_stride, frame_width, frame_height, frame_format,
-        frame, filtered_frame, ts_sec_low, ts_sec_high, ts_ns
+        ts_sec_low, ts_sec_high, ts_ns
     );
 
-    av_frame_free(&frame);
-    av_frame_free(&filtered_frame);
+    av_frame_unref(frame);
+    av_frame_unref(filtered_frame);
 }
 
 void initialize_encoder(int width, int height) {
@@ -329,6 +316,18 @@ void initialize_encoder(int width, int height) {
 
     if (avcodec_open2(video_codec_context, video_codec, NULL) < 0) {
         printf("Cannot open codec.\n");
+        return;
+    }
+
+    frame = av_frame_alloc();
+    if (frame == NULL) {
+        printf("Cannot allocate frame.\n");
+        return;
+    }
+
+    filtered_frame = av_frame_alloc();
+    if (filtered_frame == NULL) {
+        printf("Cannot allocate frame.\n");
         return;
     }
 
