@@ -257,6 +257,56 @@ static void internal_encode_frame(
     }
 }
 
+void finish_encode() {
+    // send a NULL frame to terminate the codec
+    if (avcodec_send_frame(video_codec_context, NULL) < 0) {
+        printf("Failed to send frame.\n");
+        return;
+    }
+
+    int codec_ret = 0;
+
+    while (codec_ret >= 0) {
+        codec_ret = avcodec_receive_packet(video_codec_context, packet);
+
+        if (codec_ret == AVERROR(EAGAIN) || codec_ret == AVERROR_EOF) {
+            // output has been fully read or no input received.
+            break;
+        } else if (codec_ret < 0) {
+            // actual errors
+            printf("Error encountered while encoding.\n");
+            return;
+        }
+
+        // now we have a packet.
+        // [TODO]: Send the packet to the queue, and allocate a new one.
+
+        av_packet_rescale_ts(
+            packet, video_codec_context->time_base, video_stream->time_base
+        );
+        packet->stream_index = video_stream->index;
+        av_interleaved_write_frame(output_context, packet);
+
+        // interleaved_write_frame reset our packet, so no unref necessary.
+    }
+
+    // Everything should have been done by now.
+    // Write the trailer
+    av_write_trailer(output_context);
+
+    // now do cleanup of the system
+    avcodec_free_context(&video_codec_context);
+    av_frame_free(&frame);
+    av_frame_free(&filtered_frame);
+    av_packet_free(&packet);
+
+    if (!(output_format->flags & AVFMT_NOFILE)) {
+        avio_closep(&output_context->pb);
+    }
+
+    avformat_free_context(output_context);
+}
+
 void encode_frame(
     void              *frame_buffer,
     uint32_t           frame_stride,

@@ -94,10 +94,11 @@ pub fn main(
 
         // Receive all data from the other thread.
         // For each received packet, release the buffer associated
-        data.buffer_pool
-            .bump_unavailable(wlresponse_rx.try_recv().iter().len());
+        while wlresponse_rx.try_recv().is_ok() {
+            data.buffer_pool.bump_unavailable(1);
+        }
 
-        if !(data.zwlr_screencopy_frame.is_none() && data.buffer_pool.has_free_buffer()) {
+        if data.zwlr_screencopy_frame.is_some() || !data.buffer_pool.has_free_buffer() {
             sleep(Duration::from_millis(1));
             continue;
         }
@@ -113,6 +114,38 @@ pub fn main(
             .expect("The wl_output object cannot be None.");
         data.zwlr_screencopy_frame = Some(screencopy_manager.capture_output(1, output, &qh, ()));
     }
+
+    drop(data.buffer_send_channel.expect("The send channel cannot be None."));
+    data.wl_output
+        .expect("The wl_output object cannot be None")
+        .release();
+    data.wl_shm
+        .expect("The wl_shm object cannot be None")
+        .release();
+    data.zwlr_screencopy_manager
+        .expect("The zwlr_screencopy_manager object cannot be None")
+        .destroy();
+    data.zwlr_screencopy_frame.inspect(|frame| {
+        frame.destroy();
+    });
+
+    // wait until the other thread has released all buffer
+    loop {
+        match wlresponse_rx.try_recv() {
+            Ok(_) => data.buffer_pool.bump_unavailable(1),
+            Err(e) => match e {
+                std::sync::mpsc::TryRecvError::Empty => {},
+                // if this trigger, we can be certain that the other thread will not be touching shared memory.
+                std::sync::mpsc::TryRecvError::Disconnected => break,
+            },
+        }
+
+        sleep(Duration::from_millis(50));
+    }
+
+    data.buffer_pool.destroy();
+
+    // everything is cleaned up!
 
     // we might have an error from the event system.
     match data.event_error {

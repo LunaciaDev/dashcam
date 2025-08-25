@@ -20,9 +20,8 @@ pub struct ManagedBufferPool {
     buffers: Vec<Buffer>,
 
     size: usize,
-    available_ptr: usize,
-    unavailable_ptr: usize,
-    initialized: bool,
+    used_size: usize,
+    ptr: usize,
 }
 
 impl Default for ManagedBufferPool {
@@ -49,19 +48,27 @@ impl ManagedBufferPool {
 
         ManagedBufferPool {
             buffers: vec,
-            available_ptr: 0,
-            unavailable_ptr: 0,
+            ptr: 0,
             size,
-            initialized: false,
+            used_size: 0,
         }
     }
 
     pub fn has_free_buffer(&self) -> bool {
-        self.available_ptr != self.unavailable_ptr || !self.initialized
+        self.used_size != self.size
     }
 
     pub fn bump_unavailable(&mut self, amount: usize) {
-        self.unavailable_ptr = (self.unavailable_ptr + amount) % self.size;
+        self.used_size -= amount;
+    }
+
+    pub fn destroy(&self) {
+        for slot in &self.buffers {
+            if let Some(wlbuf) = &slot.wl_buffer {
+                wlbuf.destroy();
+                destroy_mmap(slot.size as usize, slot.raw_data.unwrap());
+            }
+        }
     }
 
     pub fn get_buffer(
@@ -77,7 +84,7 @@ impl ManagedBufferPool {
             return Err(0);
         }
 
-        let buffer = &mut self.buffers[self.available_ptr];
+        let buffer = &mut self.buffers[self.ptr];
 
         // if the buffer has yet to be allocated, the format is not matching or the size is not matching, allocate.
         if buffer.wl_buffer.is_none()
@@ -113,11 +120,8 @@ impl ManagedBufferPool {
             pool.destroy();
         }
 
-        if !self.initialized {
-            self.initialized = true;
-        }
-
-        self.available_ptr = (self.available_ptr + 1) % self.size;
+        self.ptr = (self.ptr + 1) % self.size;
+        self.used_size += 1;
 
         Ok((
             buffer.wl_buffer.as_ref().unwrap(),

@@ -10,9 +10,8 @@ use std::{
     os::raw::c_void,
     ptr::NonNull,
     sync::{
-        Arc, Barrier,
-        mpsc::{Receiver, Sender},
-    },
+        mpsc::{Receiver, Sender}, Arc, Barrier
+    }
 };
 use wayland_client::protocol::wl_shm::Format;
 
@@ -41,7 +40,7 @@ mod encoder_ffi {
 
     unsafe extern "C" {
         pub unsafe fn initialize_encoder(width: i32, height: i32);
-        pub fn encode_frame(
+        pub unsafe fn encode_frame(
             frame_buffer: *mut c_void,
             frame_stride: u32,
             frame_width: u32,
@@ -51,6 +50,7 @@ mod encoder_ffi {
             timestamp_sec_high: u32,
             timestamp_ns: u32,
         );
+        pub unsafe fn finish_encode();
     }
 }
 
@@ -86,9 +86,9 @@ pub fn start(
         let frame_info = match wlpacket_rx.recv() {
             Ok(f) => f,
             Err(_) => {
-                // the capturing thread crashed, so..
+                // Sender thread might have crashed - we start wrapping up.
                 set_halt();
-                return;
+                break;
             }
         };
 
@@ -97,12 +97,26 @@ pub fn start(
         match wlresponse_tx.send(0x44) {
             Ok(f) => f,
             Err(_) => {
-                // the capturing thread crashed, so..
+                // Same deal, wrap up as sender thread might have crashed.
                 set_halt();
-                return;
+                break;
             }
         };
     }
+
+    // continue going until there is no data left.
+    while let Ok(frame_info) = wlpacket_rx.try_recv() {
+        encode_frame(frame_info);
+
+        match wlresponse_tx.send(0x44) {
+            Ok(f) => f,
+            Err(_) => {
+                // We ignore the send error, as we want to use up all remaining buffers.
+            }
+        };
+    }
+
+    unsafe { encoder_ffi::finish_encode() };
 }
 
 fn format_conversion(format: Format) -> i32 {

@@ -16,5 +16,6 @@ void encode_frame(
     uint32_t timestamp_sec_high,
     uint32_t timestamp_ns
 );
+void finish_encode();
 
 #endif
