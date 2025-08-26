@@ -4,7 +4,7 @@ use std::thread::{self, sleep};
 use std::time::Duration;
 
 use crate::ffmpeg_encoder::FrameInfo;
-use crate::utils::{is_halt, HALT_FLAG};
+use crate::utils::{HALT_FLAG, is_halt};
 
 mod ffmpeg_encoder;
 mod utils;
@@ -33,19 +33,14 @@ fn launch() -> Result<(), Box<dyn Error>> {
         let (screensize_tx, screensize_rx) = mpsc::channel::<ScreenDimension>();
         let thread_barrier = start_barrier.clone();
         capture_thread_handle = thread::spawn(|| {
-            wl_capture::start(
-                screensize_tx,
-                wlpacket_tx,
-                wlresponse_rx,
-                thread_barrier,
-            );
+            wl_capture::start(screensize_tx, wlpacket_tx, wlresponse_rx, thread_barrier);
         });
         screen_dimension = match screensize_rx.recv() {
             Ok(s) => s,
             Err(_) => {
                 // the capturing thread crashed
                 return Ok(());
-            },
+            }
         };
         // after this, receiver is dropped, so the channel should close
     }

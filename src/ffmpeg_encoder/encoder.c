@@ -14,6 +14,7 @@
 #include "libavformat/avio.h"
 #include "libavutil/error.h"
 #include "libavutil/frame.h"
+#include "libavutil/log.h"
 #include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixfmt.h"
@@ -202,7 +203,7 @@ static void internal_encode_frame(
 
     // feed the frame into the filtergraph
     if (av_buffersrc_add_frame_flags(buffersource_context, frame, 0) < 0) {
-        printf("Failed to push frame to filters.\n");
+        fprintf(stderr, "Failed to push frame to filters.\n");
         return;
     }
 
@@ -216,14 +217,14 @@ static void internal_encode_frame(
             break;
         } else if (buffersink_ret < 0) {
             // filter error!
-            printf("Error encountered while filtering.\n");
+            fprintf(stderr, "Error encountered while filtering.\n");
             return;
         }
 
         // we now have a frame filtered. Send it to the encoder.
 
         if (avcodec_send_frame(video_codec_context, filtered_frame) < 0) {
-            printf("Failed to send frame.\n");
+            fprintf(stderr, "Failed to send frame.\n");
             return;
         }
 
@@ -238,7 +239,7 @@ static void internal_encode_frame(
                 return;
             } else if (codec_ret < 0) {
                 // actual errors
-                printf("Error encountered while encoding.\n");
+                fprintf(stderr, "Error encountered while encoding.\n");
                 return;
             }
 
@@ -260,7 +261,7 @@ static void internal_encode_frame(
 void finish_encode() {
     // send a NULL frame to terminate the codec
     if (avcodec_send_frame(video_codec_context, NULL) < 0) {
-        printf("Failed to send frame.\n");
+        fprintf(stderr, "Failed to send frame.\n");
         return;
     }
 
@@ -274,7 +275,7 @@ void finish_encode() {
             break;
         } else if (codec_ret < 0) {
             // actual errors
-            printf("Error encountered while encoding.\n");
+            fprintf(stderr, "Error encountered while encoding.\n");
             return;
         }
 
@@ -296,6 +297,7 @@ void finish_encode() {
 
     // now do cleanup of the system
     avcodec_free_context(&video_codec_context);
+    avfilter_graph_free(&filter_graph);
     av_frame_free(&frame);
     av_frame_free(&filtered_frame);
     av_packet_free(&packet);
@@ -331,22 +333,24 @@ void initialize_encoder(int width, int height) {
     width -= width % 2;
     height -= height % 2;
 
+    av_log_set_level(AV_LOG_TRACE);
+
     // [TODO]: Allow customizing codec
-    video_codec = avcodec_find_encoder_by_name("libvpx-vp9");
+    video_codec = avcodec_find_encoder_by_name("libx264");
     if (video_codec == NULL) {
-        printf("Cannot find codec.\n");
+        fprintf(stderr, "Cannot find codec.\n");
         return;
     }
 
     video_codec_context = avcodec_alloc_context3(video_codec);
     if (video_codec_context == NULL) {
-        printf("Cannot allocate codec.\n");
+        fprintf(stderr, "Cannot allocate codec.\n");
         return;
     }
 
     packet = av_packet_alloc();
     if (packet == NULL) {
-        printf("Cannot allocate packet");
+        fprintf(stderr, "Cannot allocate packet");
         return;
     }
 
@@ -365,19 +369,19 @@ void initialize_encoder(int width, int height) {
     pixel_format = AV_PIX_FMT_YUV420P;
 
     if (avcodec_open2(video_codec_context, video_codec, NULL) < 0) {
-        printf("Cannot open codec.\n");
+        fprintf(stderr, "Cannot open codec.\n");
         return;
     }
 
     frame = av_frame_alloc();
     if (frame == NULL) {
-        printf("Cannot allocate frame.\n");
+        fprintf(stderr, "Cannot allocate frame.\n");
         return;
     }
 
     filtered_frame = av_frame_alloc();
     if (filtered_frame == NULL) {
-        printf("Cannot allocate frame.\n");
+        fprintf(stderr, "Cannot allocate frame.\n");
         return;
     }
 
@@ -385,7 +389,7 @@ void initialize_encoder(int width, int height) {
 
     avformat_alloc_output_context2(&output_context, NULL, NULL, "output.mkv");
     if (output_context == NULL) {
-        printf("Unrecognized container format, using matroska as fallback.");
+        fprintf(stderr, "Unrecognized container format, using matroska as fallback.");
         avformat_alloc_output_context2(
             &output_context, NULL, "matroska", "output.mkv"
         );
@@ -399,7 +403,7 @@ void initialize_encoder(int width, int height) {
 
     video_stream = avformat_new_stream(output_context, video_codec);
     if (video_stream == NULL) {
-        printf("Cannot allocate stream");
+        fprintf(stderr, "Cannot allocate stream");
         return;
     }
     video_stream->id = output_context->nb_streams - 1;
@@ -416,13 +420,14 @@ void initialize_encoder(int width, int height) {
 
     if (!(output_format->flags & AVFMT_NOFILE)) {
         if (avio_open(&output_context->pb, "output.mkv", AVIO_FLAG_WRITE) < 0) {
-            printf("Cannot open AVIO context");
+            fprintf(stderr, "Cannot open AVIO context");
             return;
         }
     }
 
+    // [FIXME]: AVERROR_INVALIDDATA on libx264
     if (avformat_write_header(output_context, NULL) < 0) {
-        printf("Cannot write header");
+        fprintf(stderr, "Cannot write header");
         return;
     }
 }
