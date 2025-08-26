@@ -6,6 +6,7 @@
 
 #include "libavcodec/avcodec.h"
 #include "libavcodec/codec.h"
+#include "libavcodec/codec_id.h"
 #include "libavcodec/packet.h"
 #include "libavfilter/avfilter.h"
 #include "libavfilter/buffersink.h"
@@ -333,10 +334,9 @@ void initialize_encoder(int width, int height) {
     width -= width % 2;
     height -= height % 2;
 
-    av_log_set_level(AV_LOG_TRACE);
-
+    // 1. Find a codec to use.
     // [TODO]: Allow customizing codec
-    video_codec = avcodec_find_encoder_by_name("libx264");
+    video_codec = avcodec_find_encoder(AV_CODEC_ID_VP9);
     if (video_codec == NULL) {
         fprintf(stderr, "Cannot find codec.\n");
         return;
