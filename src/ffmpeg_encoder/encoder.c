@@ -15,7 +15,6 @@
 #include "libavformat/avio.h"
 #include "libavutil/error.h"
 #include "libavutil/frame.h"
-#include "libavutil/log.h"
 #include "libavutil/mem.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixfmt.h"
@@ -342,54 +341,55 @@ void initialize_encoder(int width, int height) {
         return;
     }
 
+    // 2. Allocate the needed objects
+    // --- Codec Context ---
     video_codec_context = avcodec_alloc_context3(video_codec);
     if (video_codec_context == NULL) {
         fprintf(stderr, "Cannot allocate codec.\n");
         return;
     }
 
+    // --- Packet ---
     packet = av_packet_alloc();
     if (packet == NULL) {
         fprintf(stderr, "Cannot allocate packet");
         return;
     }
 
-    // Arbitrary value?
-    video_codec_context->bit_rate = 400000;
-    video_codec_context->width = width;
-    video_codec_context->height = height;
-    video_codec_context->time_base = (AVRational){1, 60};
-    // We do not have a constant frame rate here
-    // if we need CFR, set this.
-    // video_codec_context->framerate = (AVRational){60, 1};
-
-    video_codec_context->gop_size = 12;
-    // Also allow setting this!
-    video_codec_context->pix_fmt = AV_PIX_FMT_YUV420P;
-    pixel_format = AV_PIX_FMT_YUV420P;
-
-    if (avcodec_open2(video_codec_context, video_codec, NULL) < 0) {
-        fprintf(stderr, "Cannot open codec.\n");
-        return;
-    }
-
+    // --- Frames ---
     frame = av_frame_alloc();
     if (frame == NULL) {
         fprintf(stderr, "Cannot allocate frame.\n");
         return;
     }
 
+    // --- Extra frame, for the filter pipeline ---
     filtered_frame = av_frame_alloc();
     if (filtered_frame == NULL) {
         fprintf(stderr, "Cannot allocate frame.\n");
         return;
     }
 
-    // output context
+    // --- Codec Parameters ---
+    // Arbitrary value?
+    video_codec_context->bit_rate = 400000;
+    video_codec_context->width = width;
+    video_codec_context->height = height;
+    video_codec_context->time_base = (AVRational){1, 60};
+    // Uncomment if something break, might be this.
+    // Since we have 0 idea about host's frame rate, setting one isn't possible.
+    // video_codec_context->framerate = (AVRational){60, 1};
+    video_codec_context->gop_size = 12;
+    // Also allow setting this!
+    video_codec_context->pix_fmt = AV_PIX_FMT_YUV420P;
+    pixel_format = AV_PIX_FMT_YUV420P;
 
+    // 3. Allocate the output context
     avformat_alloc_output_context2(&output_context, NULL, NULL, "output.mkv");
     if (output_context == NULL) {
-        fprintf(stderr, "Unrecognized container format, using matroska as fallback.");
+        fprintf(
+            stderr, "Unrecognized container format, using matroska as fallback."
+        );
         avformat_alloc_output_context2(
             &output_context, NULL, "matroska", "output.mkv"
         );
@@ -398,9 +398,16 @@ void initialize_encoder(int width, int height) {
         return;
     }
 
+    // Check if we need global headers.
+    if (output_context->oformat->flags & AVFMT_GLOBALHEADER) {
+        video_codec_context->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+    }
+
+    // 4. Set the codec and format
     output_context->video_codec = video_codec;
     output_format = output_context->oformat;
 
+    // 5. Create a new stream and assign it to the context
     video_stream = avformat_new_stream(output_context, video_codec);
     if (video_stream == NULL) {
         fprintf(stderr, "Cannot allocate stream");
@@ -408,16 +415,20 @@ void initialize_encoder(int width, int height) {
     }
     video_stream->id = output_context->nb_streams - 1;
 
+    // 6. Initialize the codec context
+    if (avcodec_open2(video_codec_context, video_codec, NULL) < 0) {
+        fprintf(stderr, "Cannot open codec.\n");
+        return;
+    }
+
+    // 7. Copy the codec parameter from context to the stream
     avcodec_parameters_from_context(
         video_stream->codecpar, video_codec_context
     );
 
-    if (output_context->oformat->flags & AVFMT_GLOBALHEADER) {
-        video_codec_context->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
-    }
-
     video_stream->time_base = video_codec_context->time_base;
 
+    // 8. Open file
     if (!(output_format->flags & AVFMT_NOFILE)) {
         if (avio_open(&output_context->pb, "output.mkv", AVIO_FLAG_WRITE) < 0) {
             fprintf(stderr, "Cannot open AVIO context");
@@ -425,7 +436,7 @@ void initialize_encoder(int width, int height) {
         }
     }
 
-    // [FIXME]: AVERROR_INVALIDDATA on libx264
+    // 9. Write header
     if (avformat_write_header(output_context, NULL) < 0) {
         fprintf(stderr, "Cannot write header");
         return;
