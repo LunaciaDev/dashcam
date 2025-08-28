@@ -36,9 +36,6 @@ pub struct Buffer {
     pub wl_buffer: Option<WlBuffer>,
     pub format: Option<Format>,
     pub size: i32,
-    pub height: i32,
-    pub width: i32,
-    pub stride: i32,
 }
 
 impl ManagedBufferPool {
@@ -112,9 +109,6 @@ impl ManagedBufferPool {
             ));
             buffer.raw_data = Some(create_mmap(size as usize, fd.as_fd()).unwrap());
             buffer.format = Some(frame_format);
-            buffer.height = frame_height;
-            buffer.width = frame_width;
-            buffer.stride = frame_stride;
             buffer.size = size;
 
             pool.destroy();
