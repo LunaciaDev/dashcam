@@ -18,4 +18,9 @@ void encode_frame(
 );
 void finish_encode();
 
+struct Packet {
+    void* avpacket_ptr;
+    int64_t pts;
+};
+
 #endif

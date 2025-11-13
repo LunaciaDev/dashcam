@@ -10,12 +10,13 @@ use std::{
     os::raw::c_void,
     ptr::NonNull,
     sync::{
-        mpsc::{Receiver, Sender}, Arc, Barrier
-    }
+        Arc, Barrier,
+        mpsc::{Receiver, Sender},
+    },
 };
 use wayland_client::protocol::wl_shm::Format;
 
-use crate::utils::{is_halt, set_halt};
+use crate::{ffmpeg_encoder::encoder_ffi, utils::{is_halt, set_halt}};
 
 pub struct FrameInfo {
     pub frame_buffer: NonNull<c_void>,
@@ -32,27 +33,6 @@ pub struct FrameInfo {
 // frame_buffer is not allowed to be written until this has released it
 // and synced via message passing, so we should be fineeee... perhaps.
 unsafe impl Send for FrameInfo {}
-
-mod encoder_ffi {
-    use std::os::raw::c_void;
-
-    use crate::ffmpeg_encoder::core::AVPixelFormat;
-
-    unsafe extern "C" {
-        pub unsafe fn initialize_encoder(width: i32, height: i32);
-        pub unsafe fn encode_frame(
-            frame_buffer: *mut c_void,
-            frame_stride: u32,
-            frame_width: u32,
-            frame_height: u32,
-            frame_format: AVPixelFormat,
-            timestamp_sec_low: u32,
-            timestamp_sec_high: u32,
-            timestamp_ns: u32,
-        );
-        pub unsafe fn finish_encode();
-    }
-}
 
 pub fn encode_frame(frame_info: FrameInfo) {
     unsafe {

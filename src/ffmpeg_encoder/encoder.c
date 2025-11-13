@@ -335,7 +335,7 @@ void initialize_encoder(int width, int height) {
 
     // 1. Find a codec to use.
     // [TODO]: Allow customizing codec
-    video_codec = avcodec_find_encoder(AV_CODEC_ID_VP9);
+    video_codec = avcodec_find_encoder(AV_CODEC_ID_H264);
     if (video_codec == NULL) {
         fprintf(stderr, "Cannot find codec.\n");
         return;
