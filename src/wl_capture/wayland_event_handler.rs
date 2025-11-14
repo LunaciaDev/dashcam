@@ -12,59 +12,55 @@ use wayland_protocols::ext::image_copy_capture::v1::client::{
     ext_image_copy_capture_session_v1::ExtImageCopyCaptureSessionV1,
 };
 
-pub struct WlHandlerStates {
-    wl_display_object: Option<WlOutput>,
-    wl_shm_object: Option<WlShm>,
-    wl_ext_image_copy_capture_manager: Option<ExtImageCopyCaptureManagerV1>,
+#[derive(Default)]
+pub struct ApplicationState {
+    pub wl_output: Option<WlOutput>,
+    pub wl_shm: Option<WlShm>,
+
+    pub copy_capture_manager: Option<ExtImageCopyCaptureManagerV1>,
+    pub copy_capture_frame: Option<ExtImageCopyCaptureFrameV1>,
+    pub copy_capture_session: Option<ExtImageCopyCaptureSessionV1>,
 }
 
-impl Dispatch<WlRegistry, ()> for WlHandlerStates {
+impl Dispatch<WlRegistry, ()> for ApplicationState {
     fn event(
         state: &mut Self,
         proxy: &WlRegistry,
         event: <WlRegistry as wayland_client::Proxy>::Event,
-        data: &(),
-        conn: &wayland_client::Connection,
+        _data: &(),
+        _conn: &wayland_client::Connection,
         qhandle: &wayland_client::QueueHandle<Self>,
     ) {
-        // Catch the announcement of global objects on the server
-        if let wl_registry::Event::Global {
-            name,
-            interface,
-            version,
-        } = event
-        {
-            // Support for copy capture broadcasted
-            if interface == "ext_image_copy_capture_manager_v1" {
-                // Depend explicitly on version 1.
-                // [TODO]: Support multiple version perhaps?
-                if version == 1 {
-                    // Assign state object
-                    state.wl_ext_image_copy_capture_manager =
-                        Some(proxy.bind::<ExtImageCopyCaptureManagerV1, _, _>(
-                            name,
-                            version,
-                            qhandle,
-                            (),
-                        ))
+        match event {
+            wl_registry::Event::Global {
+                name,
+                interface,
+                version,
+            } => match interface.as_str() {
+                "ext_image_copy_capture_manager_v1" => {
+                    if version != 1 {
+                        return;
+                    }
+
+                    state.copy_capture_manager = Some(proxy.bind(name, version, qhandle, ()));
                 }
-            }
-
-            // Support for wayland output (aka it can show something)
-            if interface == "wl_output" {
-                state.wl_display_object =
-                    Some(proxy.bind::<WlOutput, _, _>(name, version, qhandle, ()));
-            }
-
-            // Support for shared memory buffer (so we can actually read what the compositor captured and pass it around)
-            if interface == "wl_shm" {
-                state.wl_shm_object = Some(proxy.bind::<WlShm, _, _>(name, version, qhandle, ()))
-            }
+                "wl_output" => {
+                    state.wl_output = Some(proxy.bind(name, version, qhandle, ()));
+                }
+                "wl_shm" => {
+                    state.wl_shm = Some(proxy.bind(name, version, qhandle, ()));
+                }
+                _ => {}
+            },
+            wl_registry::Event::GlobalRemove { name: _ } => {
+                todo!("Implement a way to recognize removed objects");
+            },
+            _ => unimplemented!(),
         }
     }
 }
 
-impl Dispatch<WlOutput, ()> for WlHandlerStates {
+impl Dispatch<WlOutput, ()> for ApplicationState {
     fn event(
         state: &mut Self,
         proxy: &WlOutput,
@@ -73,11 +69,19 @@ impl Dispatch<WlOutput, ()> for WlHandlerStates {
         conn: &wayland_client::Connection,
         qhandle: &wayland_client::QueueHandle<Self>,
     ) {
-        todo!()
+        match event {
+            wayland_client::protocol::wl_output::Event::Geometry { x, y, physical_width, physical_height, subpixel, make, model, transform } => todo!(),
+            wayland_client::protocol::wl_output::Event::Mode { flags, width, height, refresh } => todo!(),
+            wayland_client::protocol::wl_output::Event::Done => todo!(),
+            wayland_client::protocol::wl_output::Event::Scale { factor } => todo!(),
+            wayland_client::protocol::wl_output::Event::Name { name } => todo!(),
+            wayland_client::protocol::wl_output::Event::Description { description } => todo!(),
+            _ => todo!(),
+        }
     }
 }
 
-impl Dispatch<WlShm, ()> for WlHandlerStates {
+impl Dispatch<WlShm, ()> for ApplicationState {
     fn event(
         state: &mut Self,
         proxy: &WlShm,
@@ -86,11 +90,14 @@ impl Dispatch<WlShm, ()> for WlHandlerStates {
         conn: &wayland_client::Connection,
         qhandle: &wayland_client::QueueHandle<Self>,
     ) {
-        todo!()
+        match event {
+            wayland_client::protocol::wl_shm::Event::Format { format } => todo!(),
+            _ => todo!(),
+        }
     }
 }
 
-impl Dispatch<ExtImageCopyCaptureManagerV1, ()> for WlHandlerStates {
+impl Dispatch<ExtImageCopyCaptureManagerV1, ()> for ApplicationState {
     fn event(
         state: &mut Self,
         proxy: &ExtImageCopyCaptureManagerV1,
@@ -103,7 +110,7 @@ impl Dispatch<ExtImageCopyCaptureManagerV1, ()> for WlHandlerStates {
     }
 }
 
-impl Dispatch<ExtImageCopyCaptureSessionV1, ()> for WlHandlerStates {
+impl Dispatch<ExtImageCopyCaptureSessionV1, ()> for ApplicationState {
     fn event(
         state: &mut Self,
         proxy: &ExtImageCopyCaptureSessionV1,
@@ -124,7 +131,7 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, ()> for WlHandlerStates {
     }
 }
 
-impl Dispatch<ExtImageCopyCaptureFrameV1, ()> for WlHandlerStates {
+impl Dispatch<ExtImageCopyCaptureFrameV1, ()> for ApplicationState {
     fn event(
         state: &mut Self,
         proxy: &ExtImageCopyCaptureFrameV1,

@@ -1,40 +1,47 @@
 use std::{
     error::Error,
-    sync::{
-        Arc, Barrier,
-        mpsc::{Receiver, Sender},
-    },
+    sync::{Arc, Barrier},
 };
 
-use crate::{ScreenDimension, ffmpeg_encoder::FrameInfo, utils::set_halt};
-
 use wayland_client::Connection;
-// We switched from zwlr_screencopy to ext_image_screencopy_manager as the former has been deprecated.
-use wayland_protocols::ext::image_copy_capture::v1::client;
 
-fn main(
-    screensize_tx: Sender<ScreenDimension>,
-    wlpacket_tx: Sender<FrameInfo>,
-    wlresponse_rx: Receiver<u8>,
-    thread_barrier: Arc<Barrier>,
-) -> Result<(), Box<dyn Error>> {
+use crate::wl_capture::wayland_event_handler::ApplicationState;
+
+
+fn main(thread_barrier: Arc<Barrier>) -> Result<(), Box<dyn Error>> {
+    let mut application_state = ApplicationState::default();
+
+    // Connect to the compositor and get the associated display
     let compositor_connection = Connection::connect_to_env()?;
     let display = compositor_connection.display();
+
+    // Create the event queue
+    let mut event_queue = compositor_connection.new_event_queue();
+    let queue_handle = event_queue.handle();
+    let _registry = display.get_registry(&queue_handle, ());
+
+    event_queue.roundtrip(&mut application_state)?;
+
+    // Do a quick check if we do have all object needed
+    // This check is for initialization - Always check the object, as it may get removed during runtime.
+
+    if application_state.wl_output.is_none() {
+        panic!();
+    }
+
+    if application_state.wl_shm.is_none() {
+        panic!();
+    }
+
+    if application_state.copy_capture_manager.is_none() {
+        panic!();
+    }
+
+    thread_barrier.wait();
 
     Ok(())
 }
 
-pub fn start(
-    screensize_tx: Sender<ScreenDimension>,
-    wlpacket_tx: Sender<FrameInfo>,
-    wlresponse_rx: Receiver<u8>,
-    thread_barrier: Arc<Barrier>,
-) {
-    match main(screensize_tx, wlpacket_tx, wlresponse_rx, thread_barrier) {
-        Ok(_) => {}
-        Err(error) => {
-            eprintln!("{}", error);
-            set_halt();
-        }
-    }
+pub fn start(thread_barrier: Arc<Barrier>) {
+    if let Ok(()) = main(thread_barrier) {}
 }
