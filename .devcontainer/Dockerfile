@@ -1,4 +1,4 @@
-FROM quay.io/fedora/fedora-minimal:42
+FROM quay.io/fedora/fedora-minimal:43
 
 # Pulling base dependencies
 RUN echo install_weak_deps=False >> /etc/dnf/dnf.conf && \
