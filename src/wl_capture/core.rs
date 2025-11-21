@@ -7,7 +7,6 @@ use wayland_client::Connection;
 
 use crate::wl_capture::wayland_event_handler::ApplicationState;
 
-
 fn main(thread_barrier: Arc<Barrier>) -> Result<(), Box<dyn Error>> {
     let mut application_state = ApplicationState::default();
 
@@ -37,7 +36,36 @@ fn main(thread_barrier: Arc<Barrier>) -> Result<(), Box<dyn Error>> {
         panic!();
     }
 
+    // Now we wait to receive information about the screen size.
+    while application_state.frame_height.is_none() || application_state.frame_width.is_none() {
+        event_queue.blocking_dispatch(&mut application_state)?;
+    }
+
+    // Send the information back to main thread
+    // [TODO]
+
+    // Wait until all system are ready.
     thread_barrier.wait();
+
+    // Main event loop.
+    loop {
+        // Flush remaining outgoing events to the server
+        event_queue.flush()?;
+
+        // Check if we have wayland events to process.
+        if let Some(read_guard) = event_queue.prepare_read() {
+            // poll until the socket is ready
+            // [TODO]
+
+            read_guard.read()?;
+            event_queue.dispatch_pending(&mut application_state)?;
+
+            // if it's not ready, drop the guard
+            //std::mem::drop(read_guard);
+        }
+
+        // Do something else
+    }
 
     Ok(())
 }

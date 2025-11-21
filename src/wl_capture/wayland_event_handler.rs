@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
+use signal_hook::flag;
 use wayland_client::{
-    Dispatch,
+    Dispatch, WEnum,
     protocol::{
-        wl_output::WlOutput,
+        wl_output::{Mode, WlOutput},
         wl_registry::{self, WlRegistry},
         wl_shm::WlShm,
     },
@@ -25,11 +26,17 @@ pub struct ApplicationState {
     pub wl_output: Option<WlOutput>,
     pub wl_shm: Option<WlShm>,
 
+    pub capture_width: Option<i32>,
+    pub capture_height: Option<i32>,
+
     pub object_keys: HashMap<u32, WaylandObjects>,
 
     pub copy_capture_manager: Option<ExtImageCopyCaptureManagerV1>,
     pub copy_capture_frame: Option<ExtImageCopyCaptureFrameV1>,
     pub copy_capture_session: Option<ExtImageCopyCaptureSessionV1>,
+
+    pub frame_width: Option<i32>,
+    pub frame_height: Option<i32>,
 }
 
 fn remove_object(state: &mut ApplicationState, name: &u32) {
@@ -54,6 +61,8 @@ fn remove_object(state: &mut ApplicationState, name: &u32) {
                 }
             }
         }
+
+        state.object_keys.remove(name);
     }
 }
 
@@ -67,6 +76,7 @@ impl Dispatch<WlRegistry, ()> for ApplicationState {
         qhandle: &wayland_client::QueueHandle<Self>,
     ) {
         match event {
+            // A new object is added
             wl_registry::Event::Global {
                 name,
                 interface,
@@ -101,62 +111,48 @@ impl Dispatch<WlRegistry, ()> for ApplicationState {
 impl Dispatch<WlOutput, ()> for ApplicationState {
     fn event(
         state: &mut Self,
-        proxy: &WlOutput,
+        _proxy: &WlOutput,
         event: <WlOutput as wayland_client::Proxy>::Event,
-        data: &(),
-        conn: &wayland_client::Connection,
-        qhandle: &wayland_client::QueueHandle<Self>,
+        _data: &(),
+        _conn: &wayland_client::Connection,
+        _qhandle: &wayland_client::QueueHandle<Self>,
     ) {
-        match event {
-            wayland_client::protocol::wl_output::Event::Geometry {
-                x,
-                y,
-                physical_width,
-                physical_height,
-                subpixel,
-                make,
-                model,
-                transform,
-            } => todo!(),
-            wayland_client::protocol::wl_output::Event::Mode {
-                flags,
-                width,
-                height,
-                refresh,
-            } => todo!(),
-            wayland_client::protocol::wl_output::Event::Done => todo!(),
-            wayland_client::protocol::wl_output::Event::Scale { factor } => todo!(),
-            wayland_client::protocol::wl_output::Event::Name { name } => todo!(),
-            wayland_client::protocol::wl_output::Event::Description { description } => todo!(),
-            _ => todo!(),
+        if let wayland_client::protocol::wl_output::Event::Mode {
+            flags,
+            width,
+            height,
+            refresh: _,
+        } = event
+            && let WEnum::Value(Mode::Current) = flags
+            && (state.capture_height.is_none() && state.capture_width.is_none())
+        {
+            state.capture_height = Some(height);
+            state.capture_width = Some(width);
         }
     }
 }
 
 impl Dispatch<WlShm, ()> for ApplicationState {
     fn event(
-        state: &mut Self,
-        proxy: &WlShm,
-        event: <WlShm as wayland_client::Proxy>::Event,
-        data: &(),
-        conn: &wayland_client::Connection,
-        qhandle: &wayland_client::QueueHandle<Self>,
+        _state: &mut Self,
+        _proxy: &WlShm,
+        _event: <WlShm as wayland_client::Proxy>::Event,
+        _data: &(),
+        _conn: &wayland_client::Connection,
+        _qhandle: &wayland_client::QueueHandle<Self>,
     ) {
-        match event {
-            wayland_client::protocol::wl_shm::Event::Format { format } => todo!(),
-            _ => todo!(),
-        }
+        // Shm format is given along with the copy request
     }
 }
 
 impl Dispatch<ExtImageCopyCaptureManagerV1, ()> for ApplicationState {
     fn event(
-        state: &mut Self,
-        proxy: &ExtImageCopyCaptureManagerV1,
-        event: <ExtImageCopyCaptureManagerV1 as wayland_client::Proxy>::Event,
-        data: &(),
-        conn: &wayland_client::Connection,
-        qhandle: &wayland_client::QueueHandle<Self>,
+        _state: &mut Self,
+        _proxy: &ExtImageCopyCaptureManagerV1,
+        _event: <ExtImageCopyCaptureManagerV1 as wayland_client::Proxy>::Event,
+        _data: &(),
+        _conn: &wayland_client::Connection,
+        _qhandle: &wayland_client::QueueHandle<Self>,
     ) {
         // Empty handler as this object have no event to handle
     }
