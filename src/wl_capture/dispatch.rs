@@ -56,9 +56,6 @@ pub struct ApplicationState {
     pub wl_output: Option<WlOutput>,
     pub wl_shm: Option<WlShm>,
 
-    pub capture_height: Option<i32>,
-    pub capture_width: Option<i32>,
-
     pub copy_capture_source_manager: Option<ExtOutputImageCaptureSourceManagerV1>,
     pub copy_capture_manager: Option<ExtImageCopyCaptureManagerV1>,
     pub copy_capture_frame: Option<ExtImageCopyCaptureFrameV1>,
@@ -75,6 +72,12 @@ pub struct ApplicationState {
 
     // BufferConfig keys
     pub buffer_config_builder: BufferConfigBuilder,
+
+    // Timestamp keys
+    pub frame_timestamp: FrameTimestamp,
+
+    // Capture config
+    pub capture_config: Option<CaptureConfigBuilder>,
 }
 
 #[derive(Default)]
@@ -82,6 +85,19 @@ pub struct BufferConfigBuilder {
     pub has_wanted_type: bool,
     pub buffer_width: u32,
     pub buffer_height: u32,
+}
+
+#[derive(Default)]
+pub struct FrameTimestamp {
+    pub sec_low: u32,
+    pub sec_high: u32,
+    pub nsec: u32,
+}
+
+#[derive(Default)]
+pub struct CaptureConfigBuilder {
+    pub capture_width: i32,
+    pub capture_height: i32,
 }
 
 fn remove_object(state: &mut ApplicationState, name: &u32) {
@@ -182,10 +198,12 @@ impl Dispatch<WlOutput, ()> for ApplicationState {
             refresh: _,
         } = event
             && let WEnum::Value(Mode::Current) = flags
-            && (state.capture_height.is_none() && state.capture_width.is_none())
+            && (state.capture_config.is_none())
         {
-            state.capture_height = Some(height);
-            state.capture_width = Some(width);
+            state.capture_config = Some(CaptureConfigBuilder {
+                capture_width: width,
+                capture_height: height,
+            });
         }
     }
 }
@@ -262,18 +280,64 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, ()> for ApplicationState {
 impl Dispatch<ExtImageCopyCaptureFrameV1, ()> for ApplicationState {
     fn event(
         state: &mut Self,
-        proxy: &ExtImageCopyCaptureFrameV1,
+        _proxy: &ExtImageCopyCaptureFrameV1,
         event: <ExtImageCopyCaptureFrameV1 as wayland_client::Proxy>::Event,
-        data: &(),
-        conn: &wayland_client::Connection,
-        qhandle: &wayland_client::QueueHandle<Self>,
+        _data: &(),
+        _conn: &wayland_client::Connection,
+        _qhandle: &wayland_client::QueueHandle<Self>,
     ) {
+        use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::Event as FrameEvent;
+
         match event {
-            wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::Event::Transform { transform } => todo!(),
-            wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::Event::Damage { x, y, width, height } => todo!(),
-            wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::Event::PresentationTime { tv_sec_hi, tv_sec_lo, tv_nsec } => todo!(),
-            wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::Event::Ready => todo!(),
-            wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::Event::Failed { reason } => todo!(),
+            FrameEvent::Transform { transform: _ } => {
+                // [TODO]: figure out the transform. Right now we capture in fullscreen so maybe no transform?
+            }
+            FrameEvent::Damage {
+                x: _,
+                y: _,
+                width: _,
+                height: _,
+            } => {
+                // Ignore since we dont really need to manage damage. Why does this exist..?
+            }
+            FrameEvent::PresentationTime {
+                tv_sec_hi,
+                tv_sec_lo,
+                tv_nsec,
+            } => {
+                // Something interesting now!
+                state.frame_timestamp.sec_low = tv_sec_lo;
+                state.frame_timestamp.sec_high = tv_sec_hi;
+                state.frame_timestamp.nsec = tv_nsec;
+            }
+            FrameEvent::Ready => {
+                // The buffer sent to the compositor is ready for reading.
+                // Build the message to be sent to the encoder, and destroy this object.
+
+                // [TODO]
+
+                state
+                    .copy_capture_frame
+                    .as_ref()
+                    .expect("CaptureFrame object must exist for this callback to run")
+                    .destroy();
+            }
+            FrameEvent::Failed { reason } => {
+                use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_frame_v1::FailureReason as FrameError;
+
+                if let WEnum::Value(t) = reason {
+                    match t {
+                        // [TODO]: Handle these errors
+                        FrameError::Unknown => todo!(),
+                        FrameError::BufferConstraints => todo!(),
+                        FrameError::Stopped => unreachable!(),
+                        _ => unimplemented!(),
+                    }
+                } else {
+                    // No idea what the reason is, panic!
+                    unimplemented!("CaptureFrame failed for unknown reason");
+                }
+            }
             _ => todo!(),
         }
     }

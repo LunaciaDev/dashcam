@@ -23,7 +23,7 @@ fn main(thread_barrier: Arc<Barrier>) -> Result<(), Box<dyn Error>> {
     event_queue.roundtrip(&mut application_state)?;
 
     // Now we wait to receive information about the screen size.
-    while application_state.capture_height.is_none() || application_state.capture_width.is_none() {
+    while application_state.capture_config.is_none() {
         event_queue.blocking_dispatch(&mut application_state)?;
     }
 
