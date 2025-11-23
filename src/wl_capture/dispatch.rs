@@ -5,7 +5,7 @@ use wayland_client::{
     protocol::{
         wl_output::{Mode, WlOutput},
         wl_registry::{self, WlRegistry},
-        wl_shm::WlShm,
+        wl_shm::{Format as ShmFormat, WlShm},
     },
 };
 use wayland_protocols::ext::{
@@ -52,21 +52,36 @@ pub enum WaylandObjects {
 
 #[derive(Default)]
 pub struct ApplicationState {
+    // Shared states
     pub wl_output: Option<WlOutput>,
     pub wl_shm: Option<WlShm>,
 
-    pub capture_width: Option<i32>,
     pub capture_height: Option<i32>,
-
-    pub object_keys: HashMap<u32, WaylandObjects>,
+    pub capture_width: Option<i32>,
 
     pub copy_capture_source_manager: Option<ExtOutputImageCaptureSourceManagerV1>,
     pub copy_capture_manager: Option<ExtImageCopyCaptureManagerV1>,
     pub copy_capture_frame: Option<ExtImageCopyCaptureFrameV1>,
     pub copy_capture_session: Option<ExtImageCopyCaptureSessionV1>,
 
-    pub frame_width: Option<i32>,
-    pub frame_height: Option<i32>,
+    pub buffer_type: Option<ShmFormat>,
+    pub buffer_width: Option<u32>,
+    pub buffer_height: Option<u32>,
+
+    // Protocol-specific state, because data field is immutable!
+    // I could use Arc<RefCell<T>> to bypass that but...
+    // Registry keys
+    pub object_keys: HashMap<u32, WaylandObjects>,
+
+    // BufferConfig keys
+    pub buffer_config_builder: BufferConfigBuilder,
+}
+
+#[derive(Default)]
+pub struct BufferConfigBuilder {
+    pub has_wanted_type: bool,
+    pub buffer_width: u32,
+    pub buffer_height: u32,
 }
 
 fn remove_object(state: &mut ApplicationState, name: &u32) {
@@ -178,21 +193,64 @@ impl Dispatch<WlOutput, ()> for ApplicationState {
 impl Dispatch<ExtImageCopyCaptureSessionV1, ()> for ApplicationState {
     fn event(
         state: &mut Self,
-        proxy: &ExtImageCopyCaptureSessionV1,
+        _proxy: &ExtImageCopyCaptureSessionV1,
         event: <ExtImageCopyCaptureSessionV1 as wayland_client::Proxy>::Event,
-        data: &(),
-        conn: &wayland_client::Connection,
-        qhandle: &wayland_client::QueueHandle<Self>,
+        _data: &(),
+        _conn: &wayland_client::Connection,
+        _qhandle: &wayland_client::QueueHandle<Self>,
     ) {
         use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_session_v1::Event as SessionEvent;
-        use wayland_client::protocol::wl_shm::Format as ShmFormat;
+
+        fn invalidate_current_buffer_config(state: &mut ApplicationState) {
+            if state.buffer_width.is_some() {
+                state.buffer_width = None;
+            }
+
+            if state.buffer_height.is_some() {
+                state.buffer_height = None;
+            }
+
+            if state.buffer_type.is_some() {
+                state.buffer_type = None;
+            }
+        }
 
         match event {
-            SessionEvent::BufferSize { width, height } => todo!(),
-            SessionEvent::ShmFormat { format } => todo!(),
-            SessionEvent::DmabufDevice { device } => todo!(),
-            SessionEvent::DmabufFormat { format, modifiers } => todo!(),
-            SessionEvent::Done => todo!(),
+            SessionEvent::BufferSize { width, height } => {
+                invalidate_current_buffer_config(state);
+                state.buffer_config_builder.buffer_height = height;
+                state.buffer_config_builder.buffer_width = width;
+            }
+            SessionEvent::ShmFormat { format } => {
+                invalidate_current_buffer_config(state);
+
+                if let WEnum::Value(ShmFormat::Xrgb8888) = format {
+                    state.buffer_config_builder.has_wanted_type = true;
+                }
+            }
+            SessionEvent::DmabufDevice { device: _ } => {
+                invalidate_current_buffer_config(state);
+
+                // [TODO]: Use DMA-BUF if available
+            }
+            SessionEvent::DmabufFormat {
+                format: _,
+                modifiers: _,
+            } => {
+                invalidate_current_buffer_config(state);
+
+                // [TODO]: Use DMA-BUF if available
+            }
+            SessionEvent::Done => {
+                state.buffer_height = Some(state.buffer_config_builder.buffer_height);
+                state.buffer_width = Some(state.buffer_config_builder.buffer_width);
+
+                if state.buffer_config_builder.has_wanted_type {
+                    state.buffer_type = Some(ShmFormat::Xrgb8888);
+                } else {
+                    panic!();
+                }
+            }
             SessionEvent::Stopped => {
                 state.copy_capture_session = None;
             }
