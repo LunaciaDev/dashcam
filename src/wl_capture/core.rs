@@ -6,7 +6,7 @@ use std::{
 use wayland_client::Connection;
 use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_manager_v1::Options;
 
-use crate::wl_capture::dispatch::ApplicationState;
+use crate::wl_capture::{dispatch::ApplicationState, utils::get_wl_object};
 
 fn main(thread_barrier: Arc<Barrier>) -> Result<(), Box<dyn Error>> {
     let mut application_state = ApplicationState::default();
@@ -32,28 +32,15 @@ fn main(thread_barrier: Arc<Barrier>) -> Result<(), Box<dyn Error>> {
 
     // Create the session
     {
-        let source_manager = match application_state.copy_capture_source_manager.as_ref() {
-            Some(t) => t,
-            None => panic!(),
-        };
-
-        let copy_manager = match application_state.copy_capture_manager.as_ref() {
-            Some(t) => t,
-            None => panic!(),
-        };
-
-        let output = match application_state.wl_output.as_ref() {
-            Some(t) => t,
-            None => panic!(),
-        };
+        let source_manager = get_wl_object!(application_state.copy_capture_source_manager);
+        let copy_manager = get_wl_object!(application_state.copy_capture_manager);
+        let output = get_wl_object!(application_state.wl_output);
 
         let source = source_manager.create_source(output, &queue_handle, ());
         let session =
             copy_manager.create_session(&source, Options::PaintCursors, &queue_handle, ());
-        let frame = session.create_frame(&queue_handle, ());
 
         application_state.copy_capture_session = Some(session);
-        application_state.copy_capture_frame = Some(frame);
     }
 
     // Wait until all system are ready.
@@ -77,7 +64,11 @@ fn main(thread_barrier: Arc<Barrier>) -> Result<(), Box<dyn Error>> {
         }
 
         // Capture an image if needed
-        {}
+        if application_state.copy_capture_frame.is_none() {
+            let copy_session = get_wl_object!(application_state.copy_capture_session);
+
+            let capture_frame = copy_session.create_frame(&queue_handle, ());
+        }
 
         // Do something else
     }

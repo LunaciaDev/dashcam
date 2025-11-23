@@ -222,14 +222,17 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, ()> for ApplicationState {
         fn invalidate_current_buffer_config(state: &mut ApplicationState) {
             if state.buffer_width.is_some() {
                 state.buffer_width = None;
+                state.buffer_config_builder.buffer_width = 0;
             }
 
             if state.buffer_height.is_some() {
                 state.buffer_height = None;
+                state.buffer_config_builder.buffer_height = 0;
             }
 
             if state.buffer_type.is_some() {
                 state.buffer_type = None;
+                state.buffer_config_builder.has_wanted_type = false;
             }
         }
 
@@ -242,7 +245,12 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, ()> for ApplicationState {
             SessionEvent::ShmFormat { format } => {
                 invalidate_current_buffer_config(state);
 
-                if let WEnum::Value(ShmFormat::Xrgb8888) = format {
+                // [TODO]: Use preferred codec format.
+                // avcodec_get_supported_config give a list of Formats that the codec support
+                // If we do not match, fall back to yuv420p or xrgb8888
+                // (yuv420p use less bandwidth while xrgb888 is guaranteed to be available)
+
+                if let WEnum::Value(ShmFormat::Yuv420) = format {
                     state.buffer_config_builder.has_wanted_type = true;
                 }
             }
@@ -264,7 +272,7 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, ()> for ApplicationState {
                 state.buffer_width = Some(state.buffer_config_builder.buffer_width);
 
                 if state.buffer_config_builder.has_wanted_type {
-                    state.buffer_type = Some(ShmFormat::Xrgb8888);
+                    state.buffer_type = Some(ShmFormat::Yuv420);
                 } else {
                     panic!();
                 }
