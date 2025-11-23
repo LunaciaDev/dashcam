@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use signal_hook::flag;
 use wayland_client::{
     Dispatch, WEnum,
     protocol::{
@@ -9,16 +8,46 @@ use wayland_client::{
         wl_shm::WlShm,
     },
 };
-use wayland_protocols::ext::image_copy_capture::v1::client::{
-    ext_image_copy_capture_frame_v1::ExtImageCopyCaptureFrameV1,
-    ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1,
-    ext_image_copy_capture_session_v1::ExtImageCopyCaptureSessionV1,
+use wayland_protocols::ext::{
+    image_capture_source::v1::client::{
+        ext_image_capture_source_v1::ExtImageCaptureSourceV1,
+        ext_output_image_capture_source_manager_v1::ExtOutputImageCaptureSourceManagerV1,
+    },
+    image_copy_capture::v1::client::{
+        ext_image_copy_capture_frame_v1::ExtImageCopyCaptureFrameV1,
+        ext_image_copy_capture_manager_v1::ExtImageCopyCaptureManagerV1,
+        ext_image_copy_capture_session_v1::ExtImageCopyCaptureSessionV1,
+    },
 };
+
+/// Create an empty `Dispatch` implementation for the corresponding Wayland Object.
+///
+/// Example:
+/// ```
+/// no_event_protocols!(wayland_client::protocol::wl_shm::WlShm);
+/// ```
+macro_rules! no_event_protocols {
+    ( $wl_object_type:ty ) => {
+        impl Dispatch<$wl_object_type, ()> for ApplicationState {
+            fn event(
+                _: &mut Self,
+                _: &$wl_object_type,
+                _: <$wl_object_type as wayland_client::Proxy>::Event,
+                _: &(),
+                _: &wayland_client::Connection,
+                _: &wayland_client::QueueHandle<Self>,
+            ) {
+                // no-op
+            }
+        }
+    };
+}
 
 pub enum WaylandObjects {
     WlOutput,
     WlShm,
     CopyManager,
+    CaptureSource,
 }
 
 #[derive(Default)]
@@ -31,6 +60,7 @@ pub struct ApplicationState {
 
     pub object_keys: HashMap<u32, WaylandObjects>,
 
+    pub copy_capture_source_manager: Option<ExtOutputImageCaptureSourceManagerV1>,
     pub copy_capture_manager: Option<ExtImageCopyCaptureManagerV1>,
     pub copy_capture_frame: Option<ExtImageCopyCaptureFrameV1>,
     pub copy_capture_session: Option<ExtImageCopyCaptureSessionV1>,
@@ -58,6 +88,12 @@ fn remove_object(state: &mut ApplicationState, name: &u32) {
                 if let Some(copy_manager) = state.copy_capture_manager.as_ref() {
                     copy_manager.destroy();
                     state.copy_capture_manager = None;
+                }
+            }
+            WaylandObjects::CaptureSource => {
+                if let Some(capture_source) = state.copy_capture_source_manager.as_ref() {
+                    capture_source.destroy();
+                    state.copy_capture_source_manager = None;
                 }
             }
         }
@@ -98,6 +134,13 @@ impl Dispatch<WlRegistry, ()> for ApplicationState {
                     state.wl_shm = Some(proxy.bind(name, version, qhandle, ()));
                     state.object_keys.insert(name, WaylandObjects::WlShm);
                 }
+                "ext_image_capture_source_v1" => {
+                    state.copy_capture_source_manager =
+                        Some(proxy.bind(name, version, qhandle, ()));
+                    state
+                        .object_keys
+                        .insert(name, WaylandObjects::CaptureSource);
+                }
                 _ => {}
             },
             wl_registry::Event::GlobalRemove { name } => {
@@ -132,32 +175,6 @@ impl Dispatch<WlOutput, ()> for ApplicationState {
     }
 }
 
-impl Dispatch<WlShm, ()> for ApplicationState {
-    fn event(
-        _state: &mut Self,
-        _proxy: &WlShm,
-        _event: <WlShm as wayland_client::Proxy>::Event,
-        _data: &(),
-        _conn: &wayland_client::Connection,
-        _qhandle: &wayland_client::QueueHandle<Self>,
-    ) {
-        // Shm format is given along with the copy request
-    }
-}
-
-impl Dispatch<ExtImageCopyCaptureManagerV1, ()> for ApplicationState {
-    fn event(
-        _state: &mut Self,
-        _proxy: &ExtImageCopyCaptureManagerV1,
-        _event: <ExtImageCopyCaptureManagerV1 as wayland_client::Proxy>::Event,
-        _data: &(),
-        _conn: &wayland_client::Connection,
-        _qhandle: &wayland_client::QueueHandle<Self>,
-    ) {
-        // Empty handler as this object have no event to handle
-    }
-}
-
 impl Dispatch<ExtImageCopyCaptureSessionV1, ()> for ApplicationState {
     fn event(
         state: &mut Self,
@@ -167,14 +184,19 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, ()> for ApplicationState {
         conn: &wayland_client::Connection,
         qhandle: &wayland_client::QueueHandle<Self>,
     ) {
+        use wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_session_v1::Event as SessionEvent;
+        use wayland_client::protocol::wl_shm::Format as ShmFormat;
+
         match event {
-            wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_session_v1::Event::BufferSize { width, height } => todo!(),
-            wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_session_v1::Event::ShmFormat { format } => todo!(),
-            wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_session_v1::Event::DmabufDevice { device } => todo!(),
-            wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_session_v1::Event::DmabufFormat { format, modifiers } => todo!(),
-            wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_session_v1::Event::Done => todo!(),
-            wayland_protocols::ext::image_copy_capture::v1::client::ext_image_copy_capture_session_v1::Event::Stopped => todo!(),
-            _ => todo!(),
+            SessionEvent::BufferSize { width, height } => todo!(),
+            SessionEvent::ShmFormat { format } => todo!(),
+            SessionEvent::DmabufDevice { device } => todo!(),
+            SessionEvent::DmabufFormat { format, modifiers } => todo!(),
+            SessionEvent::Done => todo!(),
+            SessionEvent::Stopped => {
+                state.copy_capture_session = None;
+            }
+            _ => unimplemented!(),
         }
     }
 }
@@ -198,3 +220,9 @@ impl Dispatch<ExtImageCopyCaptureFrameV1, ()> for ApplicationState {
         }
     }
 }
+
+// Wayland Protocols without events to handle
+no_event_protocols!(WlShm);
+no_event_protocols!(ExtOutputImageCaptureSourceManagerV1);
+no_event_protocols!(ExtImageCaptureSourceV1);
+no_event_protocols!(ExtImageCopyCaptureManagerV1);

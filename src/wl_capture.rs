@@ -1,4 +1,4 @@
 mod core;
-mod wayland_event_handler;
+mod dispatch;
 
 pub use core::start;
