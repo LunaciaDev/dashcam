@@ -1,11 +1,9 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, os::raw::c_void, ptr::NonNull};
 
 use wayland_client::{
     Dispatch, WEnum,
     protocol::{
-        wl_output::{Mode, WlOutput},
-        wl_registry::{self, WlRegistry},
-        wl_shm::{Format as ShmFormat, WlShm},
+        wl_buffer::WlBuffer, wl_output::{Mode, WlOutput}, wl_registry::{self, WlRegistry}, wl_shm::{Format as ShmFormat, WlShm}, wl_shm_pool::WlShmPool
     },
 };
 use wayland_protocols::ext::{
@@ -64,6 +62,7 @@ pub struct ApplicationState {
     pub buffer_type: Option<ShmFormat>,
     pub buffer_width: Option<u32>,
     pub buffer_height: Option<u32>,
+    pub buffer_raw: Option<NonNull<c_void>>,
 
     // Protocol-specific state, because data field is immutable!
     // I could use Arc<RefCell<T>> to bypass that but...
@@ -353,6 +352,8 @@ impl Dispatch<ExtImageCopyCaptureFrameV1, ()> for ApplicationState {
 
 // Wayland Protocols without events to handle
 no_event_protocols!(WlShm);
+no_event_protocols!(WlShmPool);
+no_event_protocols!(WlBuffer); // Release event is unused by CopyCapture
 no_event_protocols!(ExtOutputImageCaptureSourceManagerV1);
 no_event_protocols!(ExtImageCaptureSourceV1);
 no_event_protocols!(ExtImageCopyCaptureManagerV1);
